@@ -6,12 +6,14 @@ import { EvaluationReport } from "./components/EvaluationReport";
 import type { EvaluationData } from "./components/EvaluationReport";
 import { RecruiterPortal } from "./components/RecruiterPortal";
 import { AdminPortal } from "./components/AdminPortal";
+import { LandingPage } from "./components/LandingPage";
+import { getStoredUser, setStoredUser, logoutUser, listenAuthState, type AuthUserProfile } from "./firebase";
 import type { ConnectionDetails } from "./types";
 import "./App.css";
 
 const TOKEN_SERVER_URL = "http://localhost:8000";
 
-type AppView = "onboarding" | "landing" | "interview" | "evaluation" | "recruiter" | "admin";
+type AppView = "landing" | "onboarding" | "interview" | "evaluation" | "recruiter" | "admin";
 type ResumeState = "none" | "uploading" | "processing" | "ready" | "error";
 
 interface ResumeInfo {
@@ -24,14 +26,17 @@ interface ResumeInfo {
 }
 
 export function App() {
-  const [view, setView] = useState<AppView>("onboarding");
+  const [view, setView] = useState<AppView>("landing");
   const [connectionDetails, setConnectionDetails] = useState<ConnectionDetails | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Firebase User Authentication state
+  const [currentUser, setCurrentUser] = useState<AuthUserProfile | null>(() => getStoredUser());
+
   // Interview session configuration
   const [jobTitle, setJobTitle] = useState("L3+ software engineering");
-  const [candidateName, setCandidateName] = useState("Saket Suman");
+  const [candidateName, setCandidateName] = useState(() => getStoredUser()?.displayName || "Saket Suman");
   const [interviewType, setInterviewType] = useState<"hr" | "technical" | "full">("full");
   const [topic, setTopic] = useState("Python Backend Systems & Distributed Architecture");
 
@@ -86,40 +91,57 @@ export function App() {
     setError(null);
 
     try {
-      const capRes = await fetch(`${TOKEN_SERVER_URL}/capacity-check`).catch(() => {
-        throw new Error(`Cannot connect to backend server at ${TOKEN_SERVER_URL}.`);
-      });
-      if (!capRes.ok) throw new Error(`Backend server error: ${capRes.status}`);
+      const capRes = await fetch(`${TOKEN_SERVER_URL}/capacity-check`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
+      if (capRes && capRes.ok) {
+        const roomName = `interview-${Date.now()}`;
+        const username = candidateName || "candidate";
 
-      const roomName = `interview-${Date.now()}`;
-      const username = candidateName || "candidate";
+        const urlRes = await fetch(`${TOKEN_SERVER_URL}/livekit-url`);
+        if (!urlRes.ok) throw new Error("Failed to get LiveKit URL");
+        const { url, error: urlErr } = await urlRes.json();
+        if (urlErr) throw new Error(urlErr);
 
-      const urlRes = await fetch(`${TOKEN_SERVER_URL}/livekit-url`);
-      if (!urlRes.ok) throw new Error("Failed to get LiveKit URL");
-      const { url, error: urlErr } = await urlRes.json();
-      if (urlErr) throw new Error(urlErr);
+        const activeTopic = topic.trim() || "Full Stack & AI Development";
+        const tokenRes = await fetch(
+          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`
+        );
+        if (!tokenRes.ok) {
+          const err = await tokenRes.json();
+          throw new Error(err.detail || "Failed to obtain room token");
+        }
+        const { token, error: tokenErr } = await tokenRes.json();
+        if (tokenErr) throw new Error(tokenErr);
 
-      const activeTopic = topic.trim() || "Full Stack & AI Development";
-      const tokenRes = await fetch(
-        `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`
-      );
-      if (!tokenRes.ok) {
-        const err = await tokenRes.json();
-        throw new Error(err.detail || "Failed to obtain room token");
+        setConnectionDetails({ url, token, roomName });
+        setView("interview");
+      } else {
+        // Offline preview mode: launch interview interface directly for local viewing
+        setConnectionDetails({ url: "ws://localhost:7880", token: "", roomName: "offline-preview" });
+        setView("interview");
       }
-      const { token, error: tokenErr } = await tokenRes.json();
-      if (tokenErr) throw new Error(tokenErr);
-
-      setConnectionDetails({ url, token, roomName });
+    } catch (_err) {
+      // Offline fallback: launch interview screen directly
+      setConnectionDetails({ url: "ws://localhost:7880", token: "", roomName: "offline-preview" });
       setView("interview");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to connect to AI agent");
+    } finally {
       setIsConnecting(false);
       isStartingRef.current = false;
     }
   };
 
   const handleInterviewEnded = (evalData?: EvaluationData) => {
+    // Forcefully stop any lingering camera or mic tracks across the whole page
+    try {
+      document.querySelectorAll("video").forEach((videoEl) => {
+        if (videoEl.srcObject && "getTracks" in videoEl.srcObject) {
+          (videoEl.srcObject as MediaStream).getTracks().forEach((track) => {
+            track.stop();
+          });
+          videoEl.srcObject = null;
+        }
+      });
+    } catch (_) {}
+
     setConnectionDetails(null);
     setIsConnecting(false);
     isStartingRef.current = false;
@@ -127,29 +149,95 @@ export function App() {
       setLatestEvaluation(evalData);
       setView("evaluation");
     } else {
-      setView("onboarding");
+      setView("landing");
     }
   };
+
+  // Sync with Firebase auth state
+  useEffect(() => {
+    const unsubscribe = listenAuthState((firebaseUser) => {
+      if (firebaseUser) {
+        const stored = getStoredUser();
+        if (!stored || stored.uid !== firebaseUser.uid) {
+          const profile: AuthUserProfile = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Candidate",
+            role: stored?.role || "candidate",
+            isDemo: false,
+          };
+          setStoredUser(profile);
+          setCurrentUser(profile);
+          if (profile.displayName) setCandidateName(profile.displayName);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLoginSuccess = (user: AuthUserProfile) => {
+    setCurrentUser(user);
+    if (user.displayName) {
+      setCandidateName(user.displayName);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setCurrentUser(null);
+  };
+
+  // 0. Landing Page (Hero intro, stats, CTA to start interview or portals)
+  if (view === "landing") {
+    return (
+      <LandingPage
+        onStartInterview={() => setView("onboarding")}
+        onRecruiterPortal={() => setView("recruiter")}
+        onAdminConsole={() => setView("admin")}
+        currentUser={currentUser}
+        onLoginSuccess={handleLoginSuccess}
+        onLogout={handleLogout}
+      />
+    );
+  }
 
   // 1. Candidate Onboarding View (Matches User's Provided Screenshot)
   if (view === "onboarding") {
     return (
       <div className="app app-dark-canvas">
         {/* Top Navbar */}
-        <nav className="top-nav">
-          <div className="nav-brand">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-            <span className="nav-title">TalentFlow AI</span>
-            <span className="nav-badge">Intelligent Proctoring</span>
+        <nav className="hv-header" style={{ position: "sticky", top: 0, zIndex: 50 }}>
+          <div className="hv-brand" onClick={() => setView("landing")}>
+            <span className="hv-logo-mark">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M4 4h16v4H4z" />
+                <path d="M4 12h16v8H4z" />
+                <path d="M10 12v8" />
+              </svg>
+            </span>
+            <span className="hv-brand-name">TALENTFLOW</span>
+            <span className="hv-brand-divider">/</span>
+            <span className="hv-brand-sub">ZARA AI</span>
           </div>
-          <div className="nav-links">
-            <button className="nav-link-btn" onClick={() => setView("recruiter")}>
-              Recruiter Portal
-            </button>
-            <button className="nav-link-btn" onClick={() => setView("admin")}>
-              Admin Console
+          <div className="hv-nav-links">
+            <button className="hv-nav-item" onClick={() => setView("landing")}>Home</button>
+            <button className="hv-nav-item" onClick={() => setView("recruiter")}>Recruiter Console</button>
+            <button className="hv-nav-item" onClick={() => setView("admin")}>Admin</button>
+          </div>
+          <div className="hv-header-actions">
+            {currentUser && (
+              <div className="hv-user-profile-badge">
+                <span className="hv-user-avatar">
+                  {currentUser.displayName ? currentUser.displayName.charAt(0).toUpperCase() : "U"}
+                </span>
+                <div className="hv-user-meta">
+                  <span className="hv-user-name">{currentUser.displayName || "Active User"}</span>
+                  <span className="hv-user-role">{currentUser.role.toUpperCase()}</span>
+                </div>
+              </div>
+            )}
+            <button className="hv-pill-cta" onClick={startLiveInterview}>
+              Start Live Interview →
             </button>
           </div>
         </nav>
@@ -192,8 +280,8 @@ export function App() {
       <div className="app">
         <LiveKitRoom
           serverUrl={connectionDetails.url}
-          token={connectionDetails.token}
-          connect={true}
+          token={connectionDetails.token || "offline-token"}
+          connect={Boolean(connectionDetails.token)}
           connectOptions={{ autoSubscribe: true }}
           options={{
             audioCaptureDefaults: { autoGainControl: true, echoCancellation: true, noiseSuppression: true },
@@ -218,10 +306,36 @@ export function App() {
   // 3. AI Evaluation & Scorecard View
   if (view === "evaluation" && latestEvaluation) {
     return (
-      <div className="app">
+      <div className="app app-dark-canvas">
+        {/* Top Navbar */}
+        <nav className="hv-header" style={{ position: "sticky", top: 0, zIndex: 50 }}>
+          <div className="hv-brand" onClick={() => setView("landing")}>
+            <span className="hv-logo-mark">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M4 4h16v4H4z" />
+                <path d="M4 12h16v8H4z" />
+                <path d="M10 12v8" />
+              </svg>
+            </span>
+            <span className="hv-brand-name">TALENTFLOW</span>
+            <span className="hv-brand-divider">/</span>
+            <span className="hv-brand-sub">ZARA AI</span>
+          </div>
+          <div className="hv-nav-links">
+            <button className="hv-nav-item" onClick={() => setView("landing")}>Home</button>
+            <button className="hv-nav-item" onClick={() => setView("recruiter")}>Recruiter Console</button>
+            <button className="hv-nav-item" onClick={() => setView("admin")}>Admin</button>
+          </div>
+          <div className="hv-header-actions">
+            <button className="hv-pill-cta" onClick={() => setView("onboarding")}>
+              New Assessment →
+            </button>
+          </div>
+        </nav>
+
         <EvaluationReport
           evaluation={latestEvaluation}
-          onRetake={() => setView("onboarding")}
+          onRetake={() => setView("landing")}
           onViewRecruiterPortal={() => setView("recruiter")}
         />
       </div>
@@ -233,6 +347,7 @@ export function App() {
     return (
       <div className="app">
         <RecruiterPortal
+          onBack={() => setView("landing")}
           onLaunchCandidateInterview={(cfg) => {
             setJobTitle(cfg.jobTitle);
             setCandidateName(cfg.candidateName);
@@ -309,6 +424,6 @@ export function App() {
   }
 
   // 5. Admin Portal
-  return <AdminPortal tokenServerUrl={TOKEN_SERVER_URL} onBack={() => setView("onboarding")} />;
+  return <AdminPortal tokenServerUrl={TOKEN_SERVER_URL} onBack={() => setView("landing")} />;
 }
 export default App;

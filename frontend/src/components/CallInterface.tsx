@@ -21,7 +21,7 @@ interface CallInterfaceProps {
 export function CallInterface({
   onEndInterview,
   interviewType = "full",
-  hasResume = false,
+  hasResume: _hasResume = false,
   topic = "",
   candidateName = "Saket Suman",
   jobTitle = "L3+ software engineering",
@@ -37,23 +37,27 @@ export function CallInterface({
   const [agentState, setAgentState] = useState<AgentState>("initializing");
   const [isLocalMicEnabled, setIsLocalMicEnabled] = useState(true);
   const [isLocalCameraEnabled, setIsLocalCameraEnabled] = useState(true);
-  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [isSubmittingEvaluation, setIsSubmittingEvaluation] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const liveTranscriptRef = useRef<string>("");
+  const controlsTimerRef = useRef<number | null>(null);
+
+  // Live transcript segments for display at bottom center
+  const [liveSegments, setLiveSegments] = useState<Array<{ speaker: string; text: string; id: string }>>([]);
 
   // Intelligent Proctoring Hook
   const { events: proctoringEvents, warningMessage, integrityScore } = useProctoring(true);
 
   // MediaRecorder for Video Interview Storage (Google Cloud Storage)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    let streamToRecord: MediaStream | null = null;
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
       .then((stream) => {
-        streamToRecord = stream;
+        recordingStreamRef.current = stream;
         try {
           const recorder = new MediaRecorder(stream, {
             mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
@@ -79,13 +83,89 @@ export function CallInterface({
 
     return () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (_) {}
       }
-      if (streamToRecord) {
-        streamToRecord.getTracks().forEach((t) => t.stop());
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
       }
     };
   }, []);
+
+  // Auto-hide controls after 4 seconds of inactivity
+  useEffect(() => {
+    const resetTimer = () => {
+      setShowControls(true);
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      controlsTimerRef.current = window.setTimeout(() => setShowControls(false), 4000);
+    };
+    resetTimer();
+    window.addEventListener("mousemove", resetTimer);
+    window.addEventListener("touchstart", resetTimer);
+    return () => {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      window.removeEventListener("mousemove", resetTimer);
+      window.removeEventListener("touchstart", resetTimer);
+    };
+  }, []);
+
+  // Web Speech API fallback for offline testing or real-time local captioning
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event: any) => {
+        const lastResult = event.results[event.results.length - 1];
+        const transcriptText = lastResult[0]?.transcript?.trim();
+        if (transcriptText) {
+          setLiveSegments((prev) => {
+            const updated = prev.filter((p) => p.id !== "local-interim");
+            return [
+              ...updated.slice(-1),
+              {
+                speaker: candidateName || "You",
+                text: transcriptText,
+                id: lastResult.isFinal ? `local-${Date.now()}` : "local-interim",
+              },
+            ];
+          });
+        }
+      };
+
+      recognition.onerror = () => {};
+      recognition.start();
+      return () => {
+        try {
+          recognition.stop();
+        } catch (_) {}
+      };
+    } catch (_) {}
+  }, [candidateName]);
+
+  // Initial greeting prompt from Zara for offline / immediate live subtitle feedback
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLiveSegments((prev) => {
+        if (prev.length > 0) return prev;
+        return [
+          {
+            speaker: "Zara",
+            text: `Hello ${candidateName || "there"}! I'm Zara, your AI interviewer today. Whenever you're ready, tell me a bit about yourself and your technical background.`,
+            id: "zara-intro",
+          },
+        ];
+      });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [candidateName]);
 
   const toggleMic = async () => {
     if (!room) return;
@@ -98,11 +178,23 @@ export function CallInterface({
     }
   };
 
+  const toggleCamera = async () => {
+    if (!room) return;
+    const newState = !isLocalCameraEnabled;
+    try {
+      await room.localParticipant.setCameraEnabled(newState);
+      setIsLocalCameraEnabled(newState);
+    } catch (err) {
+      console.warn("Toggle camera error:", err);
+    }
+  };
+
   const handleEndInterview = async () => {
     setIsSubmittingEvaluation(true);
     let finalVideoUrl = "";
     let storageProvider = "Google Cloud Storage";
 
+    // Stop MediaRecorder immediately
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try {
         await new Promise<void>((resolve) => {
@@ -114,6 +206,39 @@ export function CallInterface({
         console.warn("Stop recorder:", e);
       }
     }
+
+    // Completely power down camera & mic hardware tracks
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
+      recordingStreamRef.current = null;
+    }
+
+    if (room && room.localParticipant) {
+      room.localParticipant.videoTrackPublications.forEach((pub) => {
+        try {
+          pub.track?.stop();
+        } catch (_) {}
+      });
+      room.localParticipant.audioTrackPublications.forEach((pub) => {
+        try {
+          pub.track?.stop();
+        } catch (_) {}
+      });
+      room.localParticipant.setCameraEnabled(false).catch(() => {});
+      room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    }
+
+    // Force-stop any active media tracks attached to video elements in the DOM
+    document.querySelectorAll("video").forEach((videoEl) => {
+      if (videoEl.srcObject && "getTracks" in videoEl.srcObject) {
+        (videoEl.srcObject as MediaStream).getTracks().forEach((track) => {
+          track.stop();
+        });
+        videoEl.srcObject = null;
+      }
+    });
 
     if (recordedChunksRef.current.length > 0) {
       try {
@@ -259,187 +384,232 @@ export function CallInterface({
 
   const isAgentSpeaking = agentState === "speaking";
 
+  // Elapsed session timer
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTimer = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
   return (
-    <div className="onboarding-modal-overlay">
+    <div className="hv-call-fullscreen">
       {/* Real-time Proctoring Alert Banner */}
       {warningMessage && (
-        <div className="proctoring-warning-banner">
+        <div className="hv-proctor-alert">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
-          <span className="warning-text">{warningMessage}</span>
+          <span className="hv-proctor-alert-text">{warningMessage}</span>
         </div>
       )}
 
-      <div className="onboarding-card">
-        {/* Top Header Bar matching Screenshot */}
-        <header className="onboarding-top-bar">
-          <button className="icon-btn-ghost" onClick={handleEndInterview} title="Exit interview">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+      {/* ─── MAIN: Fullscreen Interviewee Video Stream ─── */}
+      <div className="hv-call-video-canvas">
+        <VideoRenderer track={localVideoTrack} label="" isLocal={true} />
 
-          <div className="onboarding-step-indicator">
-            <span className="step-circle">2</span>
-            <span className="step-label">{jobTitle} &bull; Live Interview</span>
-          </div>
+        {/* Havu Architectural Corner Viewfinder Crosshairs */}
+        <div className="hv-viewfinder-crosshair top-left"></div>
+        <div className="hv-viewfinder-crosshair top-right"></div>
+        <div className="hv-viewfinder-crosshair bottom-left"></div>
+        <div className="hv-viewfinder-crosshair bottom-right"></div>
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <div className="recording-pill">
-              <span className="rec-dot"></span>
-              <span>REC &bull; GCS Active</span>
-            </div>
-            <div className="integrity-pill">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        {/* Candidate Identifier Watermark */}
+        <div className="hv-candidate-watermark">
+          <span className="hv-candidate-dot"></span>
+          <span>{candidateName || "Candidate"} // LIVE FEED</span>
+        </div>
+      </div>
+
+      {/* ─── HAVU ARCHITECTURAL TOP HUD ─── */}
+      <header className={`hv-call-header ${showControls ? "visible" : "hidden"}`}>
+        {/* Left: Brand Monogram & Candidate Tag */}
+        <div className="hv-call-header-left">
+          <div className="hv-brand">
+            <span className="hv-logo-mark">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M4 4h16v4H4z" />
+                <path d="M4 12h16v8H4z" />
+                <path d="M10 12v8" />
               </svg>
-              <span>{integrityScore}% Integrity</span>
-            </div>
-          </div>
-        </header>
-
-        {/* Section Headline */}
-        <section className="onboarding-headline">
-          <h1>Live Interview with Zara</h1>
-          <p>
-            Zara is listening and evaluating in real time. Speak naturally into your microphone — questions are tailored to {topic}.
-          </p>
-        </section>
-
-        {/* Two-Column Grid matching Screenshot */}
-        <div className="onboarding-grid">
-          {/* Left Column: Your Camera Feed */}
-          <div className="onboarding-left-panel">
-            <div className="panel-header">
-              <h2>Your Camera Feed</h2>
-              <p>{isLocalCameraEnabled ? "Webcam active and framed in center." : "Connecting camera..."}</p>
-            </div>
-
-            <div className="camera-preview-box">
-              <VideoRenderer track={localVideoTrack} label={candidateName || "You"} isLocal={true} />
-              <div className="camera-badge-pill">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/>
-                </svg>
-              </div>
-            </div>
-
-            {/* Device Status row */}
-            <div className="device-selectors-row">
-              <div className="device-select-wrapper" onClick={toggleMic} style={{ cursor: "pointer" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                </svg>
-                <span style={{ fontSize: "0.8rem", color: isLocalMicEnabled ? "#10b981" : "#ef4444" }}>
-                  {isLocalMicEnabled ? "Mic Active (Click to mute)" : "Mic Muted"}
-                </span>
-              </div>
-
-              <div className="device-select-wrapper">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                  <line x1="8" y1="21" x2="16" y2="21"></line>
-                </svg>
-                <span style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
-                  {hasResume ? "Resume Grounded" : "Direct Assessment"}
-                </span>
-              </div>
-
-              <div className="device-select-wrapper">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <polyline points="12 6 12 12 14 14"></polyline>
-                </svg>
-                <span style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
-                  {interviewType.toUpperCase()} Mode
-                </span>
-              </div>
-            </div>
+            </span>
+            <span className="hv-brand-name" style={{ fontSize: "0.95rem" }}>TALENTFLOW</span>
+            <span className="hv-brand-divider">/</span>
+            <span className="hv-brand-sub" style={{ fontSize: "0.7rem" }}>ZARA AI</span>
           </div>
 
-          {/* Right Column: Zara AI with glowing 3D particle sphere */}
-          <div className="onboarding-right-panel">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2>Zara (AI Interviewer)</h2>
-              <span className={`ai-status-tag ${isAgentSpeaking ? "speaking" : "listening"}`}>
-                {isAgentSpeaking ? "Zara Speaking" : "Zara Listening..."}
+          <div className="hv-call-status-pill">
+            <span className="hv-rec-dot"></span>
+            <span>LIVE // REC</span>
+          </div>
+        </div>
+
+        {/* Center: Monospaced Session Timer & Topic */}
+        <div className="hv-call-header-center">
+          <div className="hv-call-timer-box">
+            <span className="hv-timer-icon">⏱</span>
+            <span className="hv-timer-digits">{formatTimer(elapsedSeconds)}</span>
+          </div>
+
+          <div className="hv-call-topic-kicker" title={topic}>
+            <span>ROLE: {jobTitle.toUpperCase()} // TOPIC: {topic ? topic.substring(0, 32).toUpperCase() : "GENERAL"}</span>
+          </div>
+        </div>
+
+        {/* Right: Integrity Score & End Button */}
+        <div className="hv-call-header-right">
+          <div className="hv-call-metric-pill" title="Real-time Proctor Integrity">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span>INTEGRITY {integrityScore}%</span>
+          </div>
+
+          <span className="hv-call-badge-format">{interviewType.toUpperCase()}</span>
+
+          <button
+            className="hv-call-end-pill"
+            onClick={handleEndInterview}
+            disabled={isSubmittingEvaluation}
+            title="Conclude Interview Session"
+          >
+            {isSubmittingEvaluation ? (
+              <span className="btn-spinner" style={{ width: 14, height: 14 }}></span>
+            ) : (
+              <span>End Session ✕</span>
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* ─── ZARA: Picture-in-Picture Card (Bottom Right) ─── */}
+      <div className="hv-call-zara-pip">
+        {/* Top Kicker Header */}
+        <div className="hv-zara-pip-top">
+          <span className="hv-zara-pip-kicker">01 — AI INTERVIEWER</span>
+          <span className="hv-zara-pip-badge">AES-256</span>
+        </div>
+
+        {/* Center: Particle Orb */}
+        <div className="hv-zara-pip-orb">
+          <ZaraOrb size={130} isSpeaking={isAgentSpeaking} />
+        </div>
+
+        {/* Bottom State Bar + Voice Wave */}
+        <div className="hv-zara-pip-bottom">
+          <div className="hv-zara-pip-status">
+            <span className={`hv-zara-status-dot ${isAgentSpeaking ? "speaking" : "listening"}`}></span>
+            <span>{isAgentSpeaking ? "ZARA SPEAKING" : "LISTENING"}</span>
+          </div>
+
+          {/* Equalizer Wave when speaking */}
+          <div className={`hv-zara-voice-wave ${isAgentSpeaking ? "active" : ""}`}>
+            <span className="wave-bar b1"></span>
+            <span className="wave-bar b2"></span>
+            <span className="wave-bar b3"></span>
+            <span className="wave-bar b4"></span>
+            <span className="wave-bar b5"></span>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── LIVE TRANSCRIPT: Bottom Center Poppins Subtitle Card ─── */}
+      <div className="hv-call-subtitles-bar">
+        <div className="hv-subtitles-hidden">
+          <Transcript
+            onTranscriptUpdate={(txt) => {
+              liveTranscriptRef.current = txt;
+              const lines = txt.split("\n\n").filter(Boolean);
+              const recent = lines.slice(-2).map((line, i) => {
+                const colonIdx = line.indexOf(":");
+                const speaker = colonIdx > 0 ? line.substring(0, colonIdx).trim() : "...";
+                const text = colonIdx > 0 ? line.substring(colonIdx + 1).trim() : line;
+                return { speaker, text, id: `sub-${lines.length - 2 + i}` };
+              });
+              setLiveSegments(recent);
+            }}
+          />
+        </div>
+
+        <div className="hv-call-subtitle-card">
+          {liveSegments.length === 0 ? (
+            <div className="hv-subtitle-placeholder">
+              <span className="hv-sub-wave-dot"></span>
+              <span>
+                {connectionState === ConnectionState.Connected
+                  ? "Zara is preparing the opening technical discussion..."
+                  : "Connecting to Zara Voice Session..."}
               </span>
             </div>
-
-            <div className="zara-canvas-card">
-              <ZaraOrb size={280} isSpeaking={isAgentSpeaking} />
-            </div>
-
-            {/* Real-time Subtitles / Instructions Box */}
-            <div className="connection-test-card" style={{ minHeight: "68px" }}>
-              <div className="connection-header">
-                <span className="connection-label">
-                  {isAgentSpeaking ? "Zara is speaking:" : "Zara is listening to you:"}
-                </span>
-                <span style={{ fontSize: "0.75rem", color: "#38bdf8" }}>
-                  {connectionState === ConnectionState.Connected ? "Connected (Low Latency)" : "Connecting..."}
-                </span>
-              </div>
-              <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.85rem", color: "#d1d5db", fontStyle: "italic" }}>
-                {isAgentSpeaking
-                  ? "Awaiting your response... feel free to speak as soon as Zara completes the question."
-                  : "Go ahead and answer — Zara will acknowledge and ask the next question immediately."}
-              </p>
-            </div>
-
-            {/* Bottom Actions matching Screenshot */}
-            <div className="onboarding-actions">
-              <button
-                className={`btn-secondary-dark ${isTranscriptOpen ? "active" : ""}`}
-                onClick={() => setIsTranscriptOpen((o) => !o)}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <line x1="16" y1="13" x2="8" y2="13"></line>
-                  <line x1="16" y1="17" x2="8" y2="17"></line>
-                </svg>
-                {isTranscriptOpen ? "Hide Transcript" : "Live Transcript"}
-              </button>
-
-              <button className="btn-test-sound" onClick={toggleMic}>
-                {isLocalMicEnabled ? "Mute Microphone" : "Unmute Microphone"}
-              </button>
-
-              <button
-                className="btn-primary-start"
-                onClick={handleEndInterview}
-                disabled={isSubmittingEvaluation}
-                style={{ background: "#dc2626" }}
-              >
-                {isSubmittingEvaluation ? "Generating Report..." : "End Interview"}
-              </button>
-            </div>
-          </div>
+          ) : (
+            liveSegments.map((seg) => {
+              const isZara = seg.speaker.includes("Zara") || seg.speaker.includes("Interviewer");
+              return (
+                <div key={seg.id} className="hv-subtitle-row">
+                  <span className={`hv-subtitle-speaker-tag ${isZara ? "zara" : "candidate"}`}>
+                    {isZara ? "ZARA AI" : "YOU"}
+                  </span>
+                  <p className="hv-subtitle-poppins-text">{seg.text}</p>
+                </div>
+              );
+            })
+          )}
         </div>
+      </div>
 
-        {/* Always-mounted transcript container so all dialogue is captured for evaluation */}
-        <div style={{
-          marginTop: "1.5rem",
-          borderTop: "1px solid #2d2d32",
-          paddingTop: "1rem",
-          display: isTranscriptOpen ? "block" : "none"
-        }}>
-          <h3 style={{ fontSize: "1rem", color: "#ffffff", marginBottom: "0.75rem" }}>Live Dialogue Transcript</h3>
-          <div style={{ maxHeight: "200px", overflowY: "auto", background: "#18181b", borderRadius: "8px", padding: "1rem" }}>
-            <Transcript onTranscriptUpdate={(txt) => { liveTranscriptRef.current = txt; }} />
-          </div>
-        </div>
-        {/* Invisible listener when drawer is closed so useTranscriptions is still capturing */}
-        {!isTranscriptOpen && (
-          <div style={{ display: "none" }}>
-            <Transcript onTranscriptUpdate={(txt) => { liveTranscriptRef.current = txt; }} />
-          </div>
-        )}
+      {/* ─── FLOATING CONTROL DOCK ─── */}
+      <div className={`hv-call-dock ${showControls ? "visible" : "hidden"}`}>
+        <button
+          className={`hv-dock-btn ${!isLocalMicEnabled ? "muted" : ""}`}
+          onClick={toggleMic}
+          title={isLocalMicEnabled ? "Mute Microphone" : "Unmute Microphone"}
+          aria-label="Toggle Microphone"
+        >
+          {isLocalMicEnabled ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+              <line x1="1" y1="1" x2="23" y2="23" />
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .64-.09 1.26-.25 1.85" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          )}
+        </button>
+
+        <button
+          className={`hv-dock-btn ${!isLocalCameraEnabled ? "muted" : ""}`}
+          onClick={toggleCamera}
+          title={isLocalCameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
+          aria-label="Toggle Camera"
+        >
+          {isLocalCameraEnabled ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M23 7l-7 5 7 5V7z" />
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+              <line x1="1" y1="1" x2="23" y2="23" />
+              <path d="M21 21l-3.6-2.5M23 7l-7 5v1.2M1 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V5z" />
+            </svg>
+          )}
+        </button>
       </div>
     </div>
   );

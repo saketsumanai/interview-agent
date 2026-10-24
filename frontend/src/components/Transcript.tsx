@@ -138,7 +138,7 @@ export function Transcript({ onTranscriptUpdate }: TranscriptProps = {}) {
         .join("\n\n");
       onTranscriptUpdate(formatted);
     }
-  }, [displayedSegments.size, onTranscriptUpdate, agent?.identity])
+  }, [displayedSegments, onTranscriptUpdate, agent?.identity])
 
   return (
     <div className="transcript-content">

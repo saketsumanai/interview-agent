@@ -19,23 +19,42 @@ export function VideoRenderer({ track, label, isLocal = false }: VideoRendererPr
     }
   }, [track])
 
+  // Fallback for offline/preview: if local and no LiveKit track yet, attach camera directly
+  useEffect(() => {
+    if (track || !isLocal) return
+    let activeStream: MediaStream | null = null
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: false })
+        .then((stream) => {
+          activeStream = stream
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream
+          }
+        })
+        .catch((err) => {
+          console.warn("Local camera fallback notice:", err)
+        })
+    }
+
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach((t) => t.stop())
+      }
+    }
+  }, [track, isLocal])
+
   return (
-    <div className="video-container">
-      {track ? (
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          muted={isLocal} 
-          playsInline 
-          className="video-element"
-        />
-      ) : (
-        <div className="video-placeholder">
-          <div className="placeholder-icon">📹</div>
-          <div className="placeholder-text">No video</div>
-        </div>
-      )}
-      <div className="video-label">{label}</div>
+    <div className="video-container fullscreen-video-container">
+      <video 
+        ref={videoRef} 
+        autoPlay 
+        muted={isLocal} 
+        playsInline 
+        className="video-element fullscreen-video-element"
+      />
+      {label ? <div className="video-label">{label}</div> : null}
     </div>
   )
 }

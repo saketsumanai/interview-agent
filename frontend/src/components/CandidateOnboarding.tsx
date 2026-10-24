@@ -47,7 +47,7 @@ export const CandidateOnboarding: React.FC<CandidateOnboardingProps> = ({
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>("");
 
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
-  const [latencyMs, setLatencyMs] = useState<number>(32);
+  const [latencyMs, setLatencyMs] = useState<number>(28);
   const [isTestingPing, setIsTestingPing] = useState(false);
   const [isPlayingSound, setIsPlayingSound] = useState(false);
 
@@ -237,382 +237,308 @@ export const CandidateOnboarding: React.FC<CandidateOnboardingProps> = ({
   };
 
   return (
-    <div className="onboarding-modal-overlay">
-      <div className="onboarding-card">
-        {/* Top Header Bar */}
-        <header className="onboarding-top-bar">
-          <button className="icon-btn-ghost" onClick={onBack} title="Close onboarding">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+    <div className="hv-onboarding-wrapper">
+      <div className="hv-onboarding-container">
+        {/* ─── Top Kicker & Navigation ─── */}
+        <div className="hv-hero-kicker-row">
+          <p className="hv-kicker">01 — PRE-FLIGHT VERIFICATION // CANDIDATE ONBOARDING</p>
+          <p className="hv-kicker hv-kicker-right">ROLE: {jobTitle.toUpperCase()} // PROCTORING ACTIVE</p>
+        </div>
 
-          <div className="onboarding-step-indicator">
-            <span className="step-circle">1</span>
-            <span className="step-label">{jobTitle}</span>
-          </div>
-        </header>
-
-        {/* Section Heading */}
-        <section className="onboarding-headline">
-          <h1>Assessment with our AI, Zara</h1>
-          <p>
-            Welcome, {candidateName}. Zara will conduct an AI-powered interview to capture your unique skills and expertise.
-            Your interview will be recorded and may be reviewed by a human expert.
+        {/* ─── Monumental Headline ─── */}
+        <div className="hv-onboarding-header">
+          <h1 className="hv-onboarding-title">
+            <span>Prepare for your session with Zara.</span>
+            <span>Camera, voice, and topic verification.</span>
+          </h1>
+          <p className="hv-onboarding-sub">
+            Welcome, <strong className="hv-highlight-text">{candidateName}</strong>. Zara conducts natural voice interviews grounded in your actual project experience. Your session is monitored by intelligent proctoring and scored across four objective rubrics.
           </p>
-        </section>
+        </div>
 
-        {/* Two-Column Grid */}
-        <div className="onboarding-grid">
-          {/* Left Column: Camera and Device Selection + Topic & Resume Setup */}
-          <div className="onboarding-left-panel">
-            <div className="panel-header">
-              <h2>Check your camera</h2>
-              <p>Please ensure you are in a well lit room and that your face is clearly visible in the center of the frame.</p>
+        {/* ─── Hairline Divider with Pixel Accent ─── */}
+        <div className="hv-hero-hairline">
+          <div className="hv-pixel-accent">
+            <span className="hv-pixel-dot"></span>
+            <span className="hv-pixel-dot"></span>
+            <span className="hv-pixel-dot"></span>
+          </div>
+        </div>
+
+        {/* ─── 2-Column Grid (Havu Style) ─── */}
+        <div className="hv-onboarding-grid">
+          {/* LEFT COLUMN: Camera & Device Checks */}
+          <div className="hv-onboarding-col">
+            <div className="hv-section-tag">
+              <span className="hv-tag-label">01 — CAMERA & SENSORS</span>
+              <span className="hv-tag-line"></span>
             </div>
 
-            {/* Video Preview Box */}
-            <div className="camera-preview-box">
+            {/* Video Preview Frame */}
+            <div className="hv-camera-frame">
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                className="camera-video-stream"
+                className="hv-camera-stream"
               />
               {!cameraPermissionGranted && (
-                <div className="camera-placeholder">
+                <div className="hv-camera-empty">
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                    <circle cx="12" cy="13" r="4"></circle>
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
                   </svg>
-                  <span>Camera permission requested...</span>
+                  <span>Awaiting webcam feed...</span>
                 </div>
               )}
-              <div className="camera-badge-pill">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/>
-                </svg>
+              <div className="hv-camera-status-pill">
+                <span className="hv-rec-dot"></span>
+                <span>{cameraPermissionGranted ? "FEED READY // 720P" : "STANDBY"}</span>
               </div>
             </div>
 
-            {/* Device Selector Dropdowns */}
-            <div className="device-selectors-row">
-              {/* Camera Picker */}
-              <div className="device-select-wrapper">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M23 7l-7 5 7 5V7z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                </svg>
-                <select
-                  value={selectedCamera}
-                  onChange={(e) => handleCameraChange(e.target.value)}
-                  className="device-select"
-                >
-                  {cameras.length > 0 ? (
-                    cameras.map((c, i) => (
-                      <option key={c.deviceId || i} value={c.deviceId}>
-                        {c.label || `Camera ${i + 1}`}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Default - FaceTime HD Camera</option>
-                  )}
-                </select>
-                <span className="chevron-down">&#9662;</span>
+            {/* Device Selector Controls */}
+            <div className="hv-device-grid">
+              {/* Camera Select */}
+              <div className="hv-device-select-box">
+                <label className="hv-device-label">CAMERA</label>
+                <div className="hv-select-wrapper">
+                  <select
+                    value={selectedCamera}
+                    onChange={(e) => handleCameraChange(e.target.value)}
+                    className="hv-select"
+                  >
+                    {cameras.length > 0 ? (
+                      cameras.map((c, i) => (
+                        <option key={c.deviceId || i} value={c.deviceId}>
+                          {c.label || `Camera ${i + 1}`}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Default - FaceTime / USB Camera</option>
+                    )}
+                  </select>
+                  <span className="hv-select-arrow">↓</span>
+                </div>
               </div>
 
-              {/* Mic Picker */}
-              <div className="device-select-wrapper">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                  <line x1="12" y1="19" x2="12" y2="23"></line>
-                  <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-                <select
-                  value={selectedMic}
-                  onChange={(e) => setSelectedMic(e.target.value)}
-                  className="device-select"
-                >
-                  {microphones.length > 0 ? (
-                    microphones.map((m, i) => (
-                      <option key={m.deviceId || i} value={m.deviceId}>
-                        {m.label || `Microphone ${i + 1}`}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Default - Built-in Microphone</option>
-                  )}
-                </select>
-                <span className="chevron-down">&#9662;</span>
+              {/* Mic Select */}
+              <div className="hv-device-select-box">
+                <label className="hv-device-label">MICROPHONE</label>
+                <div className="hv-select-wrapper">
+                  <select
+                    value={selectedMic}
+                    onChange={(e) => setSelectedMic(e.target.value)}
+                    className="hv-select"
+                  >
+                    {microphones.length > 0 ? (
+                      microphones.map((m, i) => (
+                        <option key={m.deviceId || i} value={m.deviceId}>
+                          {m.label || `Microphone ${i + 1}`}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Default - Built-in Microphone</option>
+                    )}
+                  </select>
+                  <span className="hv-select-arrow">↓</span>
+                </div>
               </div>
 
-              {/* Speaker Picker */}
-              <div className="device-select-wrapper">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-                </svg>
-                <select
-                  value={selectedSpeaker}
-                  onChange={(e) => setSelectedSpeaker(e.target.value)}
-                  className="device-select"
-                >
-                  {speakers.length > 0 ? (
-                    speakers.map((s, i) => (
-                      <option key={s.deviceId || i} value={s.deviceId}>
-                        {s.label || `Speaker ${i + 1}`}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Default - Built-in Speakers</option>
-                  )}
-                </select>
-                <span className="chevron-down">&#9662;</span>
+              {/* Speaker Select */}
+              <div className="hv-device-select-box">
+                <label className="hv-device-label">AUDIO OUTPUT</label>
+                <div className="hv-select-wrapper">
+                  <select
+                    value={selectedSpeaker}
+                    onChange={(e) => setSelectedSpeaker(e.target.value)}
+                    className="hv-select"
+                  >
+                    {speakers.length > 0 ? (
+                      speakers.map((s, i) => (
+                        <option key={s.deviceId || i} value={s.deviceId}>
+                          {s.label || `Speaker ${i + 1}`}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Default - Built-in Speakers</option>
+                    )}
+                  </select>
+                  <span className="hv-select-arrow">↓</span>
+                </div>
               </div>
             </div>
 
-            {/* Resume Upload & Topic Controls */}
-            <div style={{ marginTop: "1.25rem", display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-              {/* Resume Card */}
-              <div style={{
-                background: "rgba(255, 255, 255, 0.04)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "10px",
-                padding: "0.85rem 1rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "0.75rem"
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", overflow: "hidden" }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                    <line x1="16" y1="13" x2="8" y2="13"></line>
-                    <line x1="16" y1="17" x2="8" y2="17"></line>
-                    <polyline points="10 9 9 9 8 9"></polyline>
-                  </svg>
-                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                    <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "#f8fafc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {resumeName || "No resume uploaded"}
-                    </div>
-                    <div style={{ fontSize: "0.72rem", color: resumeUploadedSuccess ? "#4ade80" : "#94a3b8" }}>
-                      {isUploadingResume ? "Ingesting resume..." : resumeUploadedSuccess ? "Resume context loaded for Zara" : "Upload your resume (PDF)"}
-                    </div>
-                  </div>
+            {/* Connection Latency & Audio Chime Check */}
+            <div className="hv-hardware-test-row">
+              <div className="hv-ping-card">
+                <div className="hv-ping-header">
+                  <span className="hv-ping-status">
+                    <span className="hv-status-indicator"></span>
+                    <span>{latencyMs}ms WebRTC Latency</span>
+                  </span>
+                  <button
+                    className={`hv-retest-btn ${isTestingPing ? "spinning" : ""}`}
+                    onClick={refreshConnection}
+                    title="Retest connection ping"
+                  >
+                    Retest ↺
+                  </button>
                 </div>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".pdf"
-                  style={{ display: "none" }}
-                  onChange={handleResumeFileSelect}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploadingResume}
-                  style={{
-                    background: "rgba(56, 189, 248, 0.12)",
-                    border: "1px solid rgba(56, 189, 248, 0.3)",
-                    color: "#38bdf8",
-                    padding: "0.4rem 0.75rem",
-                    borderRadius: "6px",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap"
-                  }}
-                >
-                  {isUploadingResume ? "Uploading..." : resumeUploadedSuccess ? "Change Resume" : "Upload PDF"}
-                </button>
+                <div className="hv-ping-bar-track">
+                  <div className="hv-ping-bar-fill" style={{ width: `${Math.max(25, 100 - latencyMs)}%` }}></div>
+                </div>
               </div>
 
-              {resumeError && (
-                <div style={{ fontSize: "0.75rem", color: "#ef4444" }}>{resumeError}</div>
-              )}
+              <button
+                type="button"
+                className={`hv-chime-btn ${isPlayingSound ? "playing" : ""}`}
+                onClick={playTestSound}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+                <span>{isPlayingSound ? "Playing Chime..." : "Test Audio Chime"}</span>
+              </button>
+            </div>
+          </div>
 
-              {/* Topic Selector */}
-              <div style={{
-                background: "rgba(255, 255, 255, 0.04)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "10px",
-                padding: "0.85rem 1rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.5rem"
-              }}>
-                <label style={{ fontSize: "0.78rem", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  Interview Topic & Skill Focus
-                </label>
+          {/* RIGHT COLUMN: Resume RAG, Focus Topic, Format, Tips */}
+          <div className="hv-onboarding-col">
+            <div className="hv-section-tag">
+              <span className="hv-tag-label">02 — RESUME & FOCUS TOPIC</span>
+              <span className="hv-tag-line"></span>
+            </div>
+
+            {/* Resume Upload Pill Card */}
+            <div className="hv-resume-card">
+              <div className="hv-resume-info">
+                <div className="hv-file-icon">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                </div>
+                <div className="hv-resume-details">
+                  <span className="hv-resume-filename">{resumeName || "No resume uploaded"}</span>
+                  <span className="hv-resume-status-text">
+                    {isUploadingResume
+                      ? "Ingesting document..."
+                      : resumeUploadedSuccess
+                      ? "Indexed for Zara contextual follow-ups"
+                      : "Upload PDF for grounded questions"}
+                  </span>
+                </div>
+              </div>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".pdf"
+                style={{ display: "none" }}
+                onChange={handleResumeFileSelect}
+              />
+              <button
+                type="button"
+                className="hv-resume-upload-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingResume}
+              >
+                {isUploadingResume ? "Uploading..." : resumeUploadedSuccess ? "Replace PDF →" : "Upload Resume →"}
+              </button>
+            </div>
+
+            {resumeError && <p className="hv-resume-error">{resumeError}</p>}
+
+            {/* Target Skill Focus / Topic */}
+            <div className="hv-focus-card">
+              <label className="hv-field-label">TARGET TECHNICAL COMPETENCY</label>
+              <input
+                type="text"
+                value={customTopic}
+                onChange={handleCustomTopicChange}
+                placeholder="e.g. Python Backend Systems, Distributed Systems, Microservices"
+                className="hv-text-input"
+              />
+
+              <div className="hv-preset-chips">
+                {TOPIC_PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => handleSelectPresetTopic(p)}
+                    className={`hv-preset-chip ${customTopic === p ? "active" : ""}`}
+                  >
+                    {p.split(" ")[0]} {p.split(" ")[1]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Interview Format Selector */}
+              <label className="hv-field-label" style={{ marginTop: "1.25rem" }}>EVALUATION FORMAT</label>
+              <div className="hv-format-switch">
+                {(["full", "technical", "hr"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => onInterviewTypeChange && onInterviewTypeChange(t)}
+                    className={`hv-format-btn ${interviewType === t ? "active" : ""}`}
+                  >
+                    {t === "full" ? "Full (Tech + STAR)" : t === "technical" ? "Deep Technical" : "Behavioral & Culture"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Candidate Name Input */}
+              <div className="hv-name-row">
+                <label className="hv-field-label">CANDIDATE NAME</label>
                 <input
                   type="text"
-                  value={customTopic}
-                  onChange={handleCustomTopicChange}
-                  placeholder="e.g. Python Backend Systems, React, Distributed Systems"
-                  style={{
-                    width: "100%",
-                    background: "rgba(15, 23, 42, 0.6)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    borderRadius: "6px",
-                    padding: "0.45rem 0.65rem",
-                    color: "#f8fafc",
-                    fontSize: "0.82rem",
-                    outline: "none"
-                  }}
+                  value={candidateName}
+                  onChange={(e) => onCandidateNameChange && onCandidateNameChange(e.target.value)}
+                  placeholder="Your Name"
+                  className="hv-text-input"
                 />
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.2rem" }}>
-                  {TOPIC_PRESETS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => handleSelectPresetTopic(p)}
-                      style={{
-                        background: customTopic === p ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                        border: customTopic === p ? "1px solid rgba(56, 189, 248, 0.5)" : "1px solid rgba(255, 255, 255, 0.08)",
-                        color: customTopic === p ? "#38bdf8" : "#94a3b8",
-                        borderRadius: "12px",
-                        padding: "0.2rem 0.55rem",
-                        fontSize: "0.7rem",
-                        cursor: "pointer",
-                        transition: "all 0.15s"
-                      }}
-                    >
-                      {p.split(" ")[0]} {p.split(" ")[1]}
-                    </button>
-                  ))}
-                </div>
+              </div>
+            </div>
 
-                {/* Interview Type Selector */}
-                <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.4rem" }}>
-                  {(["full", "technical", "hr"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => onInterviewTypeChange && onInterviewTypeChange(t)}
-                      style={{
-                        flex: 1,
-                        background: interviewType === t ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.04)",
-                        border: interviewType === t ? "1px solid rgba(56, 189, 248, 0.5)" : "1px solid rgba(255, 255, 255, 0.08)",
-                        color: interviewType === t ? "#38bdf8" : "#94a3b8",
-                        borderRadius: "6px",
-                        padding: "0.32rem 0.4rem",
-                        fontSize: "0.72rem",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        transition: "all 0.15s"
-                      }}
-                    >
-                      {t === "full" ? "Full (Tech + STAR)" : t === "technical" ? "Technical" : "Behavioral (HR)"}
-                    </button>
-                  ))}
+            {/* Zara Avatar Card & Proctoring Guidelines */}
+            <div className="hv-zara-preview-box">
+              <div className="hv-orb-wrapper">
+                <ZaraOrb size={170} isSpeaking={isPlayingSound} />
+              </div>
+              <div className="hv-guidelines">
+                <span className="hv-guidelines-title">EXAMINATION PROTOCOLS</span>
+                <div className="hv-rule-item">
+                  <span className="hv-rule-index">01</span>
+                  <span>Quiet room with zero background voices or noise</span>
                 </div>
-
-                {/* Candidate Name Input */}
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.3rem" }}>
-                  <label style={{ fontSize: "0.75rem", color: "#64748b", whiteSpace: "nowrap" }}>Candidate Name:</label>
-                  <input
-                    type="text"
-                    value={candidateName}
-                    onChange={(e) => onCandidateNameChange && onCandidateNameChange(e.target.value)}
-                    placeholder="Candidate name"
-                    style={{
-                      flex: 1,
-                      background: "rgba(15, 23, 42, 0.4)",
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
-                      borderRadius: "4px",
-                      color: "#f8fafc",
-                      fontSize: "0.78rem",
-                      padding: "0.25rem 0.45rem",
-                      outline: "none",
-                    }}
-                  />
+                <div className="hv-rule-item">
+                  <span className="hv-rule-index">02</span>
+                  <span>Good front-facing lighting with webcam centered</span>
+                </div>
+                <div className="hv-rule-item hv-rule-warning">
+                  <span className="hv-rule-index">03</span>
+                  <span>AI assistance or tab deflections trigger immediate proctor flag</span>
                 </div>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Right Column: Zara Preview, Tips, and Readiness */}
-          <div className="onboarding-right-panel">
-            <h2>Ready to interview with Zara?</h2>
-
-            {/* AI Avatar Canvas */}
-            <div className="zara-canvas-card">
-              <ZaraOrb size={280} isSpeaking={isPlayingSound} />
-            </div>
-
-            {/* Interview Tips matching screenshot */}
-            <div className="interview-tips-list">
-              <span className="tips-title">Tips for the interview:</span>
-              <div className="tip-item">
-                <svg className="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                </svg>
-                <span>Quiet room with no background noise</span>
-              </div>
-              <div className="tip-item">
-                <svg className="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="5"/>
-                  <line x1="12" y1="1" x2="12" y2="3"/>
-                  <line x1="12" y1="21" x2="12" y2="23"/>
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                  <line x1="1" y1="12" x2="3" y2="12"/>
-                  <line x1="21" y1="12" x2="23" y2="12"/>
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                </svg>
-                <span>Good lighting conditions to see your face</span>
-              </div>
-              <div className="tip-item tip-danger">
-                <svg className="tip-icon danger-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-                </svg>
-                <span className="danger-text">AI use or outside human assistance will result in a ban</span>
-              </div>
-            </div>
-
-            {/* Connection Test Bar */}
-            <div className="connection-test-card">
-              <div className="connection-header">
-                <span className="connection-label">Connection Test</span>
-                <button
-                  className={`refresh-btn ${isTestingPing ? "rotating" : ""}`}
-                  onClick={refreshConnection}
-                  title="Retest connection"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="23 4 23 10 17 10"></polyline>
-                    <polyline points="1 20 1 14 7 14"></polyline>
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                  </svg>
-                </button>
-              </div>
-              <div className="connection-bar-bg">
-                <div className="connection-bar-fill" style={{ width: `${Math.max(25, 100 - latencyMs)}%` }}></div>
-              </div>
-            </div>
-
-            {/* Bottom Actions */}
-            <div className="onboarding-actions">
-              <button className="btn-secondary-dark" onClick={onBack}>
-                Back
-              </button>
-              <button className="btn-test-sound" onClick={playTestSound}>
-                {isPlayingSound ? "Testing..." : "Test sound"}
-              </button>
-              <button className="btn-primary-start" onClick={onStartInterview}>
-                Start Interview
-              </button>
-            </div>
-          </div>
+        {/* ─── Bottom Actions (Havu Style) ─── */}
+        <div className="hv-onboarding-actions">
+          <button className="hv-secondary-btn large" onClick={onBack}>
+            ← Back to Overview
+          </button>
+          <button className="hv-primary-btn large" onClick={onStartInterview}>
+            Start Interview with Zara →
+          </button>
         </div>
       </div>
     </div>
