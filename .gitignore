@@ -1,0 +1,41 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.local
+KMS/
+
+# Python & Virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+frontend/node_modules/
+frontend/dist/
+
+# Local databases, personal resumes, recordings & reports
+backend/data/chroma_db/
+backend/data/resume_chroma_db/
+backend/data/recordings/
+backend/data/reports/
+backend/data/interviews/
+backend/data/resume.pdf
+backend/data/resume_text.txt
+backend/data/session_config.json
+
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
