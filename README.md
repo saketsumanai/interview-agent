@@ -8,10 +8,10 @@
 
 | Member | Role & Responsibilities | Branch |
 |---|---|---|
-| **Saket Suman** | **Lead Full-Stack & AI Systems Architect**<br>• Core LiveKit WebRTC pipeline & Groq LLM integration<br>• Real-time voice agent orchestration (Zara) & Cartesia TTS<br>• Token capacity server & dual-LLM evaluation engine | `member/saket` |
-| **Aashish Chandra** | **Computer Vision & Proctoring Engineer**<br>• Tab switch, focus loss & browser tamper detection hooks<br>• Face presence, multi-person & gaze deviation monitoring<br>• Proctoring integrity scoring & violation telemetry audit | `member/aashish` |
-| **Apurva Sinha** | **Backend & Knowledge Retrieval (RAG) Engineer**<br>• Multi-format resume extraction (PDF, DOCX) & text chunking<br>• ChromaDB vector embeddings & semantic retrieval pipeline<br>• Dynamic prompt synthesis & grounded question generation | `member/apurva` |
-| **Vishist Sinha** | **Frontend UI/UX & Cloud Infrastructure Engineer**<br>• Modern dark-canvas React interface (Onboarding, Room, Reports)<br>• Web Audio API sound testing, orb visualizer & live transcripts<br>• Google Cloud Storage video archival & evaluation dashboard | `member/vishist` |
+| [**Saket Suman**](https://github.com/saketsumanai)<br>`@saketsumanai` | **Lead Full-Stack & AI Systems Architect**<br>• Core LiveKit WebRTC pipeline & Groq LLM integration<br>• Real-time voice agent orchestration (Zara) & Cartesia TTS<br>• Token capacity server & dual-LLM evaluation engine | [`member/saket`](https://github.com/saketsumanai/interview-agent/tree/member/saket) |
+| [**Aashish Chandra**](https://github.com/Aashish-Chandr)<br>`@Aashish-Chandr` | **Computer Vision & Proctoring Engineer**<br>• Tab switch, focus loss & browser tamper detection hooks<br>• Face presence, multi-person & gaze deviation monitoring<br>• Proctoring integrity scoring & violation telemetry audit | [`member/aashish`](https://github.com/saketsumanai/interview-agent/tree/member/aashish) |
+| [**Apurva Sinha**](https://github.com/apurvafx)<br>`@apurvafx` | **Backend & Knowledge Retrieval (RAG) Engineer**<br>• Multi-format resume extraction (PDF, DOCX) & text chunking<br>• ChromaDB vector embeddings & semantic retrieval pipeline<br>• Dynamic prompt synthesis & grounded question generation | [`member/apurva`](https://github.com/saketsumanai/interview-agent/tree/member/apurva) |
+| [**Vishisht Sonker**](https://github.com/vishishtsonker)<br>`@vishishtsonker` | **Frontend UI/UX & Cloud Infrastructure Engineer**<br>• Modern dark-canvas React interface (Onboarding, Room, Reports)<br>• Web Audio API sound testing, orb visualizer & live transcripts<br>• Google Cloud Storage video archival & evaluation dashboard | [`member/vishist`](https://github.com/saketsumanai/interview-agent/tree/member/vishist) |
 
 ---
 
