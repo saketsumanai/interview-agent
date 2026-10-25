@@ -15,11 +15,21 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
+if os.getenv("VERCEL") or not os.access(BASE_DIR, os.W_OK):
+    DATA_DIR = Path("/tmp") / "data"
+else:
+    DATA_DIR = BASE_DIR / "data"
+
 REPORTS_DIR = DATA_DIR / "reports"
 INTERVIEWS_DIR = DATA_DIR / "interviews"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    REPORTS_DIR = Path("/tmp") / "reports"
+    INTERVIEWS_DIR = Path("/tmp") / "interviews"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def call_llm_json(prompt: str) -> Dict[str, Any]:

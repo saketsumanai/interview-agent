@@ -13,9 +13,17 @@ logger = logging.getLogger(__name__)
 
 # Base storage directories
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
+if os.getenv("VERCEL") or not os.access(BASE_DIR, os.W_OK):
+    DATA_DIR = Path("/tmp") / "data"
+else:
+    DATA_DIR = BASE_DIR / "data"
+
 RECORDINGS_DIR = DATA_DIR / "recordings"
-RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    RECORDINGS_DIR = Path("/tmp") / "recordings"
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_gcs_client():

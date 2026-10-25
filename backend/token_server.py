@@ -898,7 +898,11 @@ async def get_single_report(session_id: str):
 # ─── RECRUITER INTERVIEW CONFIGURATION & QUESTION GENERATION ────────────────
 
 RECRUITER_INTERVIEWS_DIR = DATA_DIR / "interviews"
-RECRUITER_INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    RECRUITER_INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    RECRUITER_INTERVIEWS_DIR = Path("/tmp") / "interviews"
+    RECRUITER_INTERVIEWS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.post("/api/recruiter/configure-interview")
