@@ -16,7 +16,6 @@ interface CallInterfaceProps {
   topic?: string;
   candidateName?: string;
   jobTitle?: string;
-  recordingConsent?: boolean;
 }
 
 export function CallInterface({
@@ -26,7 +25,6 @@ export function CallInterface({
   topic = "",
   candidateName = "Saket Suman",
   jobTitle = "L3+ software engineering",
-  recordingConsent = false,
 }: CallInterfaceProps) {
   const connectionState = useConnectionState();
   const room = useRoomContext();
@@ -50,46 +48,20 @@ export function CallInterface({
   // Intelligent Proctoring Hook
   const { events: proctoringEvents, warningMessage, integrityScore } = useProctoring(true);
 
-  // MediaRecorder for Video Interview Storage (Google Cloud Storage) — ONLY if consented
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // Ephemeral camera stream preview (Privacy: No recordings are saved or persisted)
   const recordingStreamRef = useRef<MediaStream | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
 
-  // Recording — always active (no-consent guard removed; consent handled at onboarding)
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
       .then((stream) => {
         recordingStreamRef.current = stream;
-        try {
-          const recorder = new MediaRecorder(stream, {
-            mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-              ? "video/webm;codecs=vp9,opus"
-              : "video/webm",
-          });
-
-          recorder.ondataavailable = (event) => {
-            if (event.data && event.data.size > 0) {
-              recordedChunksRef.current.push(event.data);
-            }
-          };
-
-          recorder.start(1000);
-          mediaRecorderRef.current = recorder;
-        } catch (e) {
-          console.warn("MediaRecorder start skipped:", e);
-        }
       })
       .catch((err) => {
-        console.warn("Camera recording access:", err);
+        console.warn("Camera preview access notice:", err);
       });
 
     return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        try {
-          mediaRecorderRef.current.stop();
-        } catch (_) {}
-      }
       if (recordingStreamRef.current) {
         recordingStreamRef.current.getTracks().forEach((t) => t.stop());
         recordingStreamRef.current = null;
@@ -194,23 +166,8 @@ export function CallInterface({
 
   const handleEndInterview = async () => {
     setIsSubmittingEvaluation(true);
-    let finalVideoUrl = "";
-    let storageProvider = recordingConsent 
-      ? "Google Cloud Storage" 
-      : "Zero-Retention Privacy Mode (No Permanent Recording)";
-
-    // Stop MediaRecorder immediately
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try {
-        await new Promise<void>((resolve) => {
-          if (!mediaRecorderRef.current) return resolve();
-          mediaRecorderRef.current.onstop = () => resolve();
-          mediaRecorderRef.current.stop();
-        });
-      } catch (e) {
-        console.warn("Stop recorder:", e);
-      }
-    }
+    const finalVideoUrl = "";
+    const storageProvider = "None (Privacy Protected - Zero Retention)";
 
     // Completely power down camera & mic hardware tracks
     if (recordingStreamRef.current) {
@@ -244,28 +201,6 @@ export function CallInterface({
         videoEl.srcObject = null;
       }
     });
-
-    if (recordedChunksRef.current.length > 0) {
-      try {
-        const videoBlob = new Blob(recordedChunksRef.current, { type: "video/webm" });
-        const formData = new FormData();
-        formData.append("file", videoBlob, `interview_${Date.now()}.webm`);
-        formData.append("candidate_name", candidateName);
-
-        const uploadRes = await fetch("/api/interviews/recordings", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          finalVideoUrl = uploadData.video_url || "";
-          storageProvider = uploadData.storage_provider || "Google Cloud Storage";
-        }
-      } catch (uploadErr) {
-        console.warn("Recording upload error:", uploadErr);
-      }
-    }
 
     let evalResult: EvaluationData | null = null;
     try {

@@ -1,40 +1,113 @@
-import os
 import json
-import asyncio
-import aiohttp
-import shutil
+import logging
+import os
 import secrets
+import shutil
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
+import aiohttp
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _BACKEND_DIR.parent
+for _d in (str(_BACKEND_DIR), str(_PROJECT_DIR)):
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Depends, Request
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from livekit import api
 
-from gcs_storage import save_recording, list_recordings, RECORDINGS_DIR
+try:
+    from backend.database import (
+        create_interview_session,
+        delete_user_account_all_stores,
+        get_interview_report,
+        get_latest_benchmark_metrics,
+        get_or_create_user,
+        get_user_interviews,
+        get_user_profile,
+        get_user_resume,
+        save_evaluation_result,
+        save_user_resume,
+        update_user_profile,
+    )
+    from backend.evaluation_service import (
+        evaluate_interview_session,
+        generate_interview_questions,
+        get_evaluation_report,
+        list_evaluation_reports,
+    )
+    from backend.gcs_storage import RECORDINGS_DIR, list_recordings, save_recording
+    from backend.rag import get_resume_full_text, get_resume_retriever, ingest_resume
+    from backend.stt_benchmark import run_stt_benchmark
+    from backend.stt_metrics import stt_telemetry
+    from backend.stt_provider import (
+        DeepgramModelType,
+        GroqModelType,
+        MissingCredentialError,
+        STTConfig,
+        STTProviderType,
+        validate_stt_config,
+    )
+except ImportError:
+    from database import (  # type: ignore
+        create_interview_session,
+        delete_user_account_all_stores,
+        get_interview_report,
+        get_latest_benchmark_metrics,
+        get_or_create_user,
+        get_user_interviews,
+        get_user_profile,
+        get_user_resume,
+        save_evaluation_result,
+        save_user_resume,
+        update_user_profile,
+    )
+    from evaluation_service import (  # type: ignore
+        evaluate_interview_session,
+        generate_interview_questions,
+        get_evaluation_report,
+        list_evaluation_reports,
+    )
+    from gcs_storage import (  # type: ignore
+        RECORDINGS_DIR,
+        list_recordings,
+        save_recording,
+    )
+    from rag import (  # type: ignore
+        get_resume_full_text,
+        get_resume_retriever,
+        ingest_resume,
+    )
+    from stt_benchmark import run_stt_benchmark  # type: ignore
+    from stt_metrics import stt_telemetry  # type: ignore
+    from stt_provider import (  # type: ignore
+        DeepgramModelType,
+        GroqModelType,
+        MissingCredentialError,
+        STTConfig,
+        STTProviderType,
+        validate_stt_config,
+    )
 import time
-from evaluation_service import (
-    generate_interview_questions,
-    evaluate_interview_session,
-    get_evaluation_report,
-    list_evaluation_reports,
-)
-from stt_provider import (
-    STTProviderType,
-    DeepgramModelType,
-    GroqModelType,
-    STTConfig,
-    validate_stt_config,
-    MissingCredentialError,
-)
-from stt_metrics import stt_telemetry
-from stt_benchmark import run_stt_benchmark
 
-load_dotenv(".env.local")
+load_dotenv(Path(__file__).parent / ".env.local")
 
 app = FastAPI(title="Interview Coach API with Proctoring & GCS", version="3.0.0")
 
@@ -74,11 +147,10 @@ async def get_active_rooms() -> list[Dict[str, Any]]:
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
 
-    if not all([livekit_url, api_key, api_secret]):
+    if not livekit_url or not api_key or not api_secret:
         return []
 
     try:
-        import re
         host = livekit_url.replace("ws://", "http://").replace("wss://", "https://")
         token = api.AccessToken(api_key, api_secret).with_grants(api.VideoGrants()).to_jwt()
 
@@ -111,12 +183,12 @@ async def run_resume_ingestion(pdf_path: Path, filename: str):
         if RESUME_DB_PATH.exists():
             shutil.rmtree(RESUME_DB_PATH)
 
-        from rag import ingest_resume
         vectorstore = ingest_resume(pdf_path=pdf_path, persist_directory=RESUME_DB_PATH)
 
         # Count chunks
         try:
-            count = vectorstore._collection.count()
+            coll = getattr(vectorstore, "_collection", None)
+            count = coll.count() if coll else 0
         except Exception:
             count = 0
 
@@ -161,12 +233,12 @@ async def check_capacity():
             "message": "Capacity available" if has_capacity else "Maximum concurrent interviews reached.",
         }
     except Exception as e:
+        logger.error(f"Capacity check error: {e}")
         return {
             "has_capacity": True,
             "active_sessions": 0,
             "max_sessions": MAX_CONCURRENT_SESSIONS,
-            "message": "Capacity check unavailable",
-            "error": str(e),
+            "message": "Capacity check temporarily unavailable",
         }
 
 
@@ -248,7 +320,21 @@ async def get_token(
         .with_metadata(json.dumps(meta))
     )
 
-    print(f"Token issued: room={room}, user={username}, type={interview_type}, topic={topic}, stt={resolved_stt_provider}")
+    # Persist interview session in primary database
+    try:
+        session_id = f"session_{room}"
+        create_interview_session(
+            session_id=session_id,
+            user_id=username,
+            room_name=room,
+            job_title=topic,
+            interview_type=interview_type,
+            topic=topic,
+        )
+    except Exception as e:
+        logger.warning(f"Could not record interview session in primary DB: {e}")
+
+    logger.info(f"Granted room entry: room={room}, user={username}, type={interview_type}, topic={topic}, stt={resolved_stt_provider}")
     return {
         "token": token.to_jwt(),
         "interview_type": interview_type,
@@ -320,26 +406,25 @@ async def health_check_providers():
     if groq_key:
         try:
             t0 = time.time()
-            async with aiohttp.ClientSession() as s:
-                async with s.get(
-                    "https://api.groq.com/openai/v1/models",
-                    headers={"Authorization": f"Bearer {groq_key}"},
-                    timeout=aiohttp.ClientTimeout(total=4.0)
-                ) as r:
-                    lat_ms = round((time.time() - t0) * 1000, 1)
-                    if r.status == 200:
-                        results["groq"] = {
-                            "configured": True,
-                            "status": "healthy",
-                            "latency_ms": lat_ms,
-                            "models": ["whisper-large-v3-turbo", "whisper-large-v3"],
-                        }
-                    else:
-                        results["groq"] = {
-                            "configured": True,
-                            "status": f"http_{r.status}",
-                            "latency_ms": lat_ms,
-                        }
+            async with aiohttp.ClientSession() as s, s.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                timeout=aiohttp.ClientTimeout(total=4.0)
+            ) as r:
+                lat_ms = round((time.time() - t0) * 1000, 1)
+                if r.status == 200:
+                    results["groq"] = {
+                        "configured": True,
+                        "status": "healthy",
+                        "latency_ms": lat_ms,
+                        "models": ["whisper-large-v3-turbo", "whisper-large-v3"],
+                    }
+                else:
+                    results["groq"] = {
+                        "configured": True,
+                        "status": f"http_{r.status}",
+                        "latency_ms": lat_ms,
+                    }
         except Exception as e:
             results["groq"] = {
                 "configured": True,
@@ -598,10 +683,10 @@ async def admin_stats(admin=Depends(verify_admin)):
     db_chunks = 0
     if RESUME_DB_PATH.exists():
         try:
-            from rag import get_resume_retriever
             r = get_resume_retriever()
             if r:
-                db_chunks = r.vectorstore._collection.count()
+                coll = getattr(getattr(r, "vectorstore", None), "_collection", None)
+                db_chunks = coll.count() if coll else 0
         except Exception:
             pass
 
@@ -622,32 +707,115 @@ async def admin_stats(admin=Depends(verify_admin)):
     }
 
 
-# ─── VIDEO RECORDING & GCS ENDPOINTS ──────────────────────────────────────────
+# ─── USER AUTH & PROFILE HELPERS ──────────────────────────────────────────────
+
+def get_auth_user_id(request: Request) -> str:
+    """Extract and sanitize authenticated user ID from Authorization header, X-User-Id, or query param."""
+    raw_uid = request.headers.get("X-User-Id", "")
+    if not raw_uid:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+            if token and len(token) > 5 and not token.startswith("offline"):
+                raw_uid = token[:40]
+    if not raw_uid:
+        raw_uid = request.query_params.get("user_id", "") or "candidate_default"
+
+    # Sanitize to valid identifier
+    sanitized = "".join(c for c in raw_uid if c.isalnum() or c in ("-", "_", "@", "."))[:64]
+    return sanitized or "candidate_default"
+
+
+@app.get("/api/user/profile")
+async def get_profile_endpoint(request: Request):
+    """Retrieve full authenticated user profile, preferences, and resume status."""
+    user_id = get_auth_user_id(request)
+    profile = get_user_profile(user_id)
+    if not profile:
+        profile = get_or_create_user(user_id)
+    resume = get_user_resume(user_id)
+    return JSONResponse(content={"profile": profile, "resume": resume})
+
+
+@app.post("/api/user/profile")
+async def update_profile_endpoint(request: Request):
+    """Save onboarding progress, career preferences, and candidate-edited skills."""
+    user_id = get_auth_user_id(request)
+    body = await request.json()
+    res = update_user_profile(
+        user_id=user_id,
+        profile_data=body.get("profile_data"),
+        skills=body.get("skills"),
+        interview_preferences=body.get("interview_preferences"),
+        onboarding_completed=body.get("onboarding_completed"),
+        display_name=body.get("display_name"),
+    )
+    return JSONResponse(content={"status": "success", "profile": res})
+
+
+@app.get("/api/user/interviews")
+async def list_user_interviews_endpoint(request: Request):
+    """List authenticated user's past interview sessions with deterministic scores."""
+    user_id = get_auth_user_id(request)
+    interviews = get_user_interviews(user_id)
+    return JSONResponse(content={"interviews": interviews})
+
+
+@app.get("/api/user/interviews/{session_id}")
+async def get_user_interview_endpoint(session_id: str, request: Request):
+    """Retrieve complete scorecard for a specific user interview."""
+    user_id = get_auth_user_id(request)
+    report = get_interview_report(session_id, user_id=user_id)
+    if not report:
+        # Fallback to global search if session was created prior
+        report = get_evaluation_report(session_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Interview evaluation not found")
+    return JSONResponse(content=report)
+
+
+@app.delete("/api/user/account")
+async def delete_user_account_endpoint(request: Request):
+    """
+    Permanent cross-store deletion (Phase 5.5 and Phase 9):
+    Purges SQLite primary records, ChromaDB embeddings, and disk files.
+    """
+    user_id = get_auth_user_id(request)
+    audit = delete_user_account_all_stores(user_id)
+    return JSONResponse(content={
+        "status": "success",
+        "message": "Account and all associated records permanently purged across all stores.",
+        "audit": audit,
+    })
+
+
+@app.get("/api/benchmarks/latest")
+async def get_latest_benchmarks_endpoint():
+    """Retrieve verified model evaluation benchmark metrics."""
+    return JSONResponse(content=get_latest_benchmark_metrics())
+
+
+# ─── PRIVACY COMPLIANT RECORDINGS (ZERO MEDIA RETENTION) ──────────────────────
 
 @app.post("/api/interviews/recordings")
-async def upload_interview_recording(
-    file: UploadFile = File(...),
-    session_id: str = Form("session-default"),
-):
+async def upload_interview_recording():
     """
-    Receive interview recording from candidate browser,
-    upload to Google Cloud Storage (with automatic local streaming fallback).
+    Enforces Phase 5.5 & Phase 10: ZERO PERMANENT VIDEO/AUDIO RECORDING RETENTION.
+    Candidate camera frames are analyzed ephemerally in-memory only.
+    No video or audio files are written to disk or cloud storage.
     """
-    content = await file.read()
-    filename = f"{session_id}_{file.filename}"
-    res = await save_recording(
-        file_bytes=content,
-        filename=filename,
-        content_type=file.content_type or "video/webm",
-        metadata={"session_id": session_id},
-    )
-    return res
+    return {
+        "recording_disabled": True,
+        "storage_provider": "None (Zero Retention Privacy Enforced)",
+        "message": "Zero permanent audio/video retention policy enforced. Candidate media is processed ephemerally in-memory.",
+        "video_url": "",
+    }
 
 
 @app.get("/api/interviews/recordings")
 async def get_recordings():
-    """List all available interview recordings."""
-    return {"recordings": list_recordings()}
+    """List all available recordings (enforces empty list under privacy policy)."""
+    return {"recordings": []}
 
 
 # ─── EVALUATION & QUALITY SCORECARD ENDPOINTS ───────────────────────────────
@@ -657,13 +825,15 @@ async def evaluate_interview(request: Request):
     """
     Generate complete AI evaluation rating, rubric scores,
     'What to Improve', 'Where to Improve', and proctoring integrity score.
+    Saves authoritative results into primary SQLite database.
     """
     body = await request.json()
+    user_id = get_auth_user_id(request)
     session_id = body.get("session_id", f"session-{secrets.token_hex(4)}")
     transcript = body.get("transcript", "")
     proctoring_logs = body.get("proctoring_logs") or body.get("proctoring_events") or []
     topic = body.get("topic", "Software Engineering")
-    video_url = body.get("video_url")
+    video_url = ""  # Zero media retention enforced
     job_description = body.get("job_description", "")
     candidate_name = body.get("candidate_name", "Saket Suman")
     job_title = body.get("job_title", "L3+ software engineering")
@@ -671,7 +841,6 @@ async def evaluate_interview(request: Request):
     # Load candidate resume text if available
     resume_text = ""
     try:
-        from rag import get_resume_full_text
         resume_text = get_resume_full_text()
     except Exception:
         pass
@@ -687,6 +856,17 @@ async def evaluate_interview(request: Request):
     )
     report["candidate_name"] = candidate_name
     report["job_title"] = job_title
+
+    # Persist authoritative evaluation in SQLite
+    try:
+        save_evaluation_result(
+            session_id=session_id,
+            user_id=user_id,
+            eval_data=report,
+        )
+    except Exception as e:
+        logger.warning(f"Could not save evaluation result to primary DB: {e}")
+
     return JSONResponse(content=report)
 
 
@@ -729,7 +909,6 @@ async def configure_recruiter_interview(request: Request):
     # Load resume text
     resume_text = ""
     try:
-        from rag import get_resume_full_text
         resume_text = get_resume_full_text()
     except Exception:
         pass
@@ -780,5 +959,5 @@ async def list_recruiter_interviews():
 
 if __name__ == "__main__":
     import uvicorn
-    print("Token Server Started!\n")
+    print("Backend Server Started!\n")
     uvicorn.run(app, host="0.0.0.0", port=8000)

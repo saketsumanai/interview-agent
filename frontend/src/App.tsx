@@ -7,13 +7,14 @@ import type { EvaluationData } from "./components/EvaluationReport";
 import { RecruiterPortal } from "./components/RecruiterPortal";
 import { AdminPortal } from "./components/AdminPortal";
 import { LandingPage } from "./components/LandingPage";
+import { CandidateDashboard } from "./components/CandidateDashboard";
 import { getStoredUser, setStoredUser, logoutUser, listenAuthState, type AuthUserProfile } from "./firebase";
 import type { ConnectionDetails } from "./types";
 import "./App.css";
 
 const TOKEN_SERVER_URL = "http://localhost:8000";
 
-type AppView = "landing" | "onboarding" | "interview" | "evaluation" | "recruiter" | "admin";
+type AppView = "landing" | "dashboard" | "onboarding" | "interview" | "evaluation" | "recruiter" | "admin";
 type ResumeState = "none" | "uploading" | "processing" | "ready" | "error";
 
 interface ResumeInfo {
@@ -42,9 +43,6 @@ export function App() {
 
   // Resume status
   const [resumeState, setResumeState] = useState<ResumeState>("ready");
-  // STT Provider & Model Selection (Deepgram Flux, Deepgram Nova-3, Groq Whisper)
-  const [sttEngine, setSttEngine] = useState<string>("deepgram:flux-general-en");
-
   const [, setResumeInfo] = useState<ResumeInfo | null>({
     filename: "Saket_Suman_Resume.pdf",
     sizeKb: 120,
@@ -105,9 +103,8 @@ export function App() {
         if (urlErr) throw new Error(urlErr);
 
         const activeTopic = topic.trim() || "Full Stack & AI Development";
-        const [sttProv, dgModel] = sttEngine.includes(":") ? sttEngine.split(":") : [sttEngine, ""];
         const tokenRes = await fetch(
-          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}&stt_provider=${encodeURIComponent(sttProv)}&deepgram_model=${encodeURIComponent(dgModel)}`
+          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`
         );
         if (!tokenRes.ok) {
           const err = await tokenRes.json();
@@ -167,7 +164,7 @@ export function App() {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Candidate",
-            role: stored?.role || "CANDIDATE",
+            role: stored?.role || "candidate",
             isDemo: false,
           };
           setStoredUser(profile);
@@ -195,13 +192,37 @@ export function App() {
   if (view === "landing") {
     return (
       <LandingPage
-        onStartInterview={() => setView("onboarding")}
+        onStartInterview={() => (currentUser ? setView("dashboard") : setView("onboarding"))}
         onRecruiterPortal={() => setView("recruiter")}
         onAdminConsole={() => setView("admin")}
         currentUser={currentUser}
         onLoginSuccess={handleLoginSuccess}
         onLogout={handleLogout}
       />
+    );
+  }
+
+  // 0b. Candidate Dashboard (Authenticated user workspace: history, recommendations, skills, deletion)
+  if (view === "dashboard" && currentUser) {
+    return (
+      <div className="app app-dark-canvas">
+        <CandidateDashboard
+          currentUser={currentUser}
+          onStartNewInterview={(cfg) => {
+            if (cfg) {
+              setJobTitle(cfg.jobTitle);
+              setTopic(cfg.topic);
+              setInterviewType(cfg.interviewType);
+            }
+            setView("onboarding");
+          }}
+          onViewEvaluation={(evalData) => {
+            setLatestEvaluation(evalData);
+            setView("evaluation");
+          }}
+          onLogout={handleLogout}
+        />
+      </div>
     );
   }
 
@@ -258,11 +279,9 @@ export function App() {
           candidateName={candidateName}
           topic={topic}
           interviewType={interviewType}
-          sttEngine={sttEngine}
           onTopicChange={setTopic}
           onInterviewTypeChange={setInterviewType}
           onCandidateNameChange={setCandidateName}
-          onSttEngineChange={setSttEngine}
           onResumeUploaded={(filename, chunks) => {
             setResumeState("ready");
             setResumeInfo({
@@ -290,8 +309,20 @@ export function App() {
           connect={Boolean(connectionDetails.token)}
           connectOptions={{ autoSubscribe: true }}
           options={{
-            audioCaptureDefaults: { autoGainControl: true, echoCancellation: true, noiseSuppression: true },
-            publishDefaults: { dtx: true, red: true, stopMicTrackOnMute: true },
+            // Browser-side audio capture: maximum noise/echo suppression
+            audioCaptureDefaults: {
+              autoGainControl: true,        // Normalize volume so soft-spoken = same as loud
+              echoCancellation: true,       // Kills speaker echo from Zara's voice
+              noiseSuppression: true,       // Browser-level background noise removal
+              sampleRate: 48000,            // 48kHz for highest fidelity STT input
+              channelCount: 1,              // Mono capture — reduces cross-channel noise
+            },
+            publishDefaults: {
+              dtx: true,                   // Discontinuous transmission — mutes silence packets
+              red: true,                   // Redundant encoding for packet-loss resilience
+              stopMicTrackOnMute: true,    // Stop mic track when muted to save bandwidth
+              audioPreset: "speech" as any, // Voice-optimized codec preset
+            },
           }}
           onDisconnected={() => handleInterviewEnded()}
         >

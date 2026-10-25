@@ -14,34 +14,26 @@ Tests:
 10. Provider health check & benchmarking harness
 """
 
-import os
 import json
+from unittest.mock import patch
+
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-from stt_provider import (
-    STTProviderType,
-    DeepgramModelType,
-    GroqModelType,
-    STTConfig,
-    validate_stt_config,
-    resolve_provider_credentials,
-    create_stt_provider,
-    TranscriptReconciler,
-    MissingCredentialError,
-    InvalidConfigurationError,
-    TECHNICAL_INTERVIEW_KEYTERMS,
-)
-from stt_metrics import (
-    calculate_levenshtein_distance,
-    calculate_wer,
-    calculate_cer,
-    STTMetricsTracker,
-    TurnTimingRecord,
-)
 from stt_benchmark import run_stt_benchmark
-
+from stt_metrics import (
+    STTMetricsTracker,
+    calculate_cer,
+    calculate_wer,
+)
+from stt_provider import (
+    DeepgramModelType,
+    InvalidConfigurationError,
+    MissingCredentialError,
+    STTConfig,
+    TranscriptReconciler,
+    create_stt_provider,
+    resolve_provider_credentials,
+    validate_stt_config,
+)
 
 # ─── 1. CONFIGURATION & CREDENTIAL VALIDATION TESTS ─────────────────────────
 

@@ -8,12 +8,11 @@ import os
 from pathlib import Path
 from typing import List
 
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-
 
 # Paths — Project documentation
 DATA_DIR = Path(__file__).parent / "data"
@@ -45,7 +44,7 @@ def load_and_chunk_documents(
     # Load PDF
     loader = PyPDFLoader(str(pdf_path))
     documents = loader.load()
-    
+
     # Split into chunks
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -54,7 +53,7 @@ def load_and_chunk_documents(
         separators=["\n\n", "\n", " ", ""],
     )
     chunks = text_splitter.split_documents(documents)
-    
+
     return chunks
 
 
@@ -91,7 +90,7 @@ def ingest_documents(
     # Load and chunk documents
     chunks = load_and_chunk_documents(pdf_path, chunk_size, chunk_overlap)
 
-    print(f"Split {len(set(doc.metadata.get('source') for doc in chunks))} documents into {len(chunks)} chunks")
+    print(f"Split {len({doc.metadata.get('source') for doc in chunks})} documents into {len(chunks)} chunks")
 
     # Create Google Generative AI embeddings (gemini-embedding-001)
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -121,8 +120,14 @@ def ingest_documents(
 
         # Respect rate limit: wait 65s between batches (free tier = 100 req/min)
         if i + batch_size < len(chunks):
-            print(f"  ⏳ Rate limit pause (65s)...", flush=True)
+            print("  ⏳ Rate limit pause (65s)...", flush=True)
             time.sleep(65)
+
+    if vectorstore is None:
+        vectorstore = Chroma(
+            embedding_function=embeddings,
+            persist_directory=str(persist_directory),
+        )
 
     print(f"Stored {len(chunks)} chunks in Chroma at {persist_directory}")
     return vectorstore
@@ -147,24 +152,24 @@ def get_retriever(
         raise FileNotFoundError(
             f"ChromaDB not found at {persist_directory}. Run ingest.py first."
         )
-    
+
     # Ensure GOOGLE_API_KEY is set
     if not os.getenv("GOOGLE_API_KEY"):
         raise ValueError(
             "GOOGLE_API_KEY environment variable must be set for Gemini embeddings"
         )
-    
+
     # Create Google Generative AI embeddings (gemini-embedding-001)
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
-    
+
     vectorstore = Chroma(
         persist_directory=str(persist_directory),
         embedding_function=embeddings,
     )
-    
+
     return vectorstore.as_retriever(search_kwargs={"k": k})
 
 
@@ -183,16 +188,16 @@ def deduplicate_documents(docs: List[Document]) -> List[Document]:
     """
     seen = set()
     unique_docs = []
-    
+
     for doc in docs:
         # Use first 150 chars as fingerprint (covers most overlap cases)
         # Normalize whitespace for better matching
         fingerprint = " ".join(doc.page_content[:150].strip().split())
-        
+
         if fingerprint not in seen:
             seen.add(fingerprint)
             unique_docs.append(doc)
-    
+
     return unique_docs
 
 
@@ -215,21 +220,21 @@ def query_rag(query: str, k: int = 4, deduplicate: bool = True) -> str:
         load_dotenv(env_path)
     else:
         load_dotenv()
-    
+
     # Retrieve more if deduplicating (to ensure we get k unique chunks)
     retrieve_k = int(k * 1.5) if deduplicate else k
     retriever = get_retriever(k=retrieve_k)
     docs = retriever.invoke(query)
-    
+
     # Deduplicate if enabled
     if deduplicate:
         docs = deduplicate_documents(docs)
         # Take top k after deduplication
         docs = docs[:k]
-    
+
     # Concatenate retrieved documents
     context = "\n\n---\n\n".join([doc.page_content for doc in docs])
-    
+
     return context
 
 
@@ -238,13 +243,15 @@ def query_rag(query: str, k: int = 4, deduplicate: bool = True) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_text_from_docx(docx_path: Path) -> str:
-    """Extract text from a DOCX file using standard library zipfile and XML parsing."""
+    """Extract text from a DOCX file safely using defusedxml."""
     import zipfile
-    import xml.etree.ElementTree as ET
+
+    from defusedxml.ElementTree import fromstring as defused_xml_fromstring
+
     try:
         with zipfile.ZipFile(docx_path) as z:
             xml_content = z.read("word/document.xml")
-        tree = ET.fromstring(xml_content)
+        tree = defused_xml_fromstring(xml_content)
         texts = [node.text for node in tree.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t") if node.text]
         return "\n".join(texts).strip()
     except Exception as e:
@@ -402,3 +409,31 @@ def query_resume_rag(query: str, k: int = 4) -> str:
         return "\n\n---\n\n".join([doc.page_content for doc in docs])
     except Exception as e:
         return f"Error querying resume: {e}"
+
+
+def delete_user_chroma_documents(user_id: str) -> int:
+    """
+    Purge ChromaDB vectors and directories associated with a specific user.
+    Enforces Phase 5.5 cross-store deletion.
+    """
+    deleted_count = 0
+    # 1. Check per-user resume directory
+    user_db_path = DATA_DIR / f"resume_chroma_db_{user_id}"
+    if user_db_path.exists():
+        import shutil
+        shutil.rmtree(user_db_path, ignore_errors=True)
+        deleted_count += 1
+
+    # 2. Check default resume DB if linked to active session
+    if RESUME_CHROMA_DB_PATH.exists():
+        try:
+            r = get_resume_retriever(RESUME_CHROMA_DB_PATH)
+            if r and hasattr(r, "vectorstore"):
+                coll = getattr(r.vectorstore, "_collection", None)
+                if coll:
+                    count = coll.count()
+                    deleted_count += count
+        except Exception:
+            pass
+    return deleted_count
+

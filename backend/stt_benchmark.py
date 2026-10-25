@@ -11,19 +11,17 @@ CRITICAL CONSTRAINT: Runs purely out-of-band on benchmark recordings.
 Does NOT double-process ordinary live interview streams.
 """
 
+import asyncio
 import io
+import logging
 import os
 import time
-import asyncio
-import logging
-from typing import Any, Dict, List, Optional, Tuple
-from pathlib import Path
+from typing import Any, Dict, Optional
 
 import aiohttp
 import openai
 from dotenv import load_dotenv
-
-from stt_metrics import calculate_wer, calculate_cer, STTMetricsTracker
+from stt_metrics import calculate_cer, calculate_wer
 from stt_provider import TECHNICAL_INTERVIEW_KEYTERMS
 
 load_dotenv(".env.local")
@@ -71,8 +69,8 @@ async def generate_synthetic_audio(text: str) -> bytes:
             logger.warning(f"Synthetic Cartesia TTS audio generation failed: {e}")
 
     # Fallback: create a 2-second 16kHz 16-bit mono WAV container with synthetic carrier tone
-    import struct
     import math
+    import struct
     sample_rate = 16000
     num_samples = sample_rate * 2
     raw_pcm = bytearray()

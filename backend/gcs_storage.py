@@ -4,11 +4,10 @@ Uploads candidate video recordings to GCS bucket when configured,
 with automatic local filesystem fallback for development or offline mode.
 """
 
-import os
-import shutil
 import logging
+import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ async def save_recording(
     local_url = f"/recordings/{safe_filename}"
 
     # 2. Attempt GCS upload if configured
-    client, bucket = get_gcs_client()
+    _client, bucket = get_gcs_client()
     gcs_url = None
     storage_type = "local"
 

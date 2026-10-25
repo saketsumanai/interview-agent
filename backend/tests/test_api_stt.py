@@ -2,11 +2,10 @@
 API Integration Tests for STT Endpoints and Health Checks.
 """
 
-import os
-import pytest
 from unittest.mock import patch
-from fastapi.testclient import TestClient
 
+import pytest
+from fastapi.testclient import TestClient
 from token_server import app
 
 

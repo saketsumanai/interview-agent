@@ -8,13 +8,15 @@ Tools available to the agent during interviews:
 """
 
 import logging
-from livekit.agents import function_tool, RunContext
+
+from livekit.agents import RunContext, function_tool
+
 try:
-    from rag import query_rag, query_resume_rag
-    from web_scraper import web_search, search_and_summarise
-except ImportError:
     from backend.rag import query_rag, query_resume_rag
-    from backend.web_scraper import web_search, search_and_summarise
+    from backend.web_scraper import search_and_summarise, web_search
+except ImportError:
+    from rag import query_rag, query_resume_rag  # type: ignore
+    from web_scraper import search_and_summarise, web_search  # type: ignore
 
 logger = logging.getLogger(__name__)
 

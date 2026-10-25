@@ -3,8 +3,9 @@ Web scraping and real-time search utilities for the interview agent.
 Uses DuckDuckGo (no API key required) + httpx + BeautifulSoup.
 """
 
-import re
 import logging
+import re
+
 import httpx
 from bs4 import BeautifulSoup
 
@@ -53,7 +54,7 @@ def web_search(query: str, max_results: int = 4) -> str:
 
     except Exception as e:
         logger.error(f"Web search error for '{query}': {e}")
-        return f"Web search failed: {str(e)}"
+        return f"Web search failed: {e!s}"
 
 
 def scrape_page(url: str, max_chars: int = MAX_CONTENT_CHARS) -> str:
@@ -99,7 +100,7 @@ def scrape_page(url: str, max_chars: int = MAX_CONTENT_CHARS) -> str:
 
     except Exception as e:
         logger.error(f"Scrape error for '{url}': {e}")
-        return f"Could not scrape page: {str(e)}"
+        return f"Could not scrape page: {e!s}"
 
 
 def search_and_summarise(query: str, max_results: int = 3) -> str:

@@ -7,12 +7,13 @@ Run this to load the PDF and create the vector database.
 import os
 import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rag import ingest_documents, PDF_PATH, CHROMA_DB_PATH
+from rag import CHROMA_DB_PATH, PDF_PATH, ingest_documents
 
 
 def main():
@@ -23,23 +24,23 @@ def main():
         load_dotenv(env_path)
     else:
         load_dotenv()  # Load from system env or .env
-    
+
     # Check for Google API key
     if not os.getenv("GOOGLE_API_KEY"):
         print("❌ Error: GOOGLE_API_KEY environment variable not set")
         print("   Please set it in .env.local or export it in your shell")
         sys.exit(1)
-    
+
     # Check if PDF exists
     if not PDF_PATH.exists():
         print(f"❌ Error: PDF not found at {PDF_PATH}")
         print("   Please place your project documentation PDF at that location")
         sys.exit(1)
-    
+
     print(f"📄 Loading PDF from: {PDF_PATH}")
     print(f"💾 Will store vector DB at: {CHROMA_DB_PATH}")
     print()
-    
+
     try:
         # Run ingestion
         ingest_documents()
@@ -50,7 +51,7 @@ def main():
         print("Next steps:")
         print("  - Verify the database: ls -la", CHROMA_DB_PATH)
         print("  - Test retrieval: python -c \"from rag import query_rag; print(query_rag('architecture'))\"")
-        
+
     except Exception as e:
         print(f"❌ Error during ingestion: {e}")
         import traceback

@@ -15,19 +15,21 @@ Includes:
 - Answers persistence on session cancellation or error
 """
 
-import os
-import re
 import json
 import logging
+import os
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from livekit.agents import stt
 
-load_dotenv(".env.local")
+_STT_DIR = Path(__file__).resolve().parent
+load_dotenv(_STT_DIR / ".env.local")
+load_dotenv(_STT_DIR.parent / ".env.local")
 logger = logging.getLogger("stt_provider")
 
 # ─── TECHNICAL INTERVIEW VOCABULARY ─────────────────────────────────────────
@@ -102,19 +104,19 @@ class STTConfig:
     model: Optional[str] = None
     language: str = "en-US"
     api_key: Optional[str] = None
-    
+
     # Endpointing & turn detection tuning
-    endpointing_ms: int = 300             # Deepgram Nova-3 silence threshold (ms)
-    eot_threshold: float = 0.75           # Deepgram Flux End-of-Turn probability threshold (0.0 - 1.0)
-    eager_eot_threshold: float = 0.55     # Deepgram Flux Eager-EOT threshold
-    eot_timeout_ms: int = 2500            # Deepgram Flux forced EOT timeout
-    
+    endpointing_ms: int = 200             # Nova-3 silence gap before turn ends (was 300ms)
+    eot_threshold: float = 0.60           # Flux EOT probability threshold (was 0.75 — lower = faster)
+    eager_eot_threshold: float = 0.40     # Flux eager-EOT threshold (was 0.55)
+    eot_timeout_ms: int = 1200            # Flux forced EOT timeout (was 2500ms — critical latency cut)
+
     # Feature flags
     interim_results: bool = True
     punctuate: bool = True
     smart_format: bool = True
     keyterms: List[str] = field(default_factory=lambda: list(TECHNICAL_INTERVIEW_KEYTERMS))
-    
+
     # Retry & timeout policies
     max_retries: int = 3
     retry_backoff_sec: float = 0.5
@@ -162,11 +164,11 @@ def validate_stt_config(config: STTConfig) -> STTConfig:
         raise InvalidConfigurationError(
             f"Invalid STT provider '{config.provider}'. Supported providers: {[p.value for p in STTProviderType]}"
         )
-    
+
     # Ensure server-side API key exists
     if not config.api_key:
         config.api_key = resolve_provider_credentials(prov)
-        
+
     # Validate / normalize model defaults
     if prov == STTProviderType.DEEPGRAM:
         if not config.model:
@@ -180,7 +182,7 @@ def validate_stt_config(config: STTConfig) -> STTConfig:
     elif prov == STTProviderType.GROQ:
         if not config.model:
             config.model = os.getenv("GROQ_STT_MODEL", GroqModelType.WHISPER_LARGE_V3_TURBO.value)
-    
+
     return config
 
 
@@ -214,6 +216,7 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> stt.STT:
                 f"Initializing Deepgram Flux STTv2 streaming adapter "
                 f"(model={model}, eot_threshold={config.eot_threshold}, eot_timeout_ms={config.eot_timeout_ms})"
             )
+            assert config.api_key, "Deepgram API key must be set before STT initialization"
             return STTv2(
                 model=model,
                 api_key=config.api_key,
@@ -230,6 +233,7 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> stt.STT:
                 f"Initializing Deepgram Nova STT streaming adapter "
                 f"(model={model}, endpointing_ms={config.endpointing_ms})"
             )
+            assert config.api_key, "Deepgram API key must be set before STT initialization"
             return DeepgramSTT(
                 model=model,
                 api_key=config.api_key,
@@ -247,8 +251,8 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> stt.STT:
         from livekit.plugins.groq import STT as GroqSTT
         model = config.model or GroqModelType.WHISPER_LARGE_V3_TURBO.value
         logger.info(f"Initializing Groq STT adapter (model={model})")
-        # Groq Whisper accepts prompt for domain vocabulary biasing
         vocab_prompt = "Technical interview discussion covering: " + ", ".join(config.keyterms[:35])
+        assert config.api_key, "Groq API key must be set before STT initialization"
         return GroqSTT(
             model=model,
             api_key=config.api_key,
@@ -259,6 +263,7 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> stt.STT:
     elif prov == STTProviderType.ASSEMBLYAI:
         from livekit.plugins.assemblyai import STT as AssemblyAISTT
         logger.info("Initializing AssemblyAI STT adapter (model=universal-streaming-english)")
+        assert config.api_key, "AssemblyAI API key must be set before STT initialization"
         return AssemblyAISTT(
             api_key=config.api_key,
             model="universal-streaming-english",
@@ -295,12 +300,12 @@ class TranscriptReconciler:
         self.session_id = session_id
         self.storage_dir = storage_dir or (Path(__file__).parent / "data" / "interviews")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # State tracking
         self.current_provisional_text: str = ""
         self.finalized_segments: List[TranscriptSegment] = []
         self.persisted_answers: List[Dict[str, Any]] = []
-        
+
         # Active turn gate
         self._turn_finalized: bool = False
         self._turn_active: bool = False
@@ -412,7 +417,7 @@ class TranscriptReconciler:
         self.current_provisional_text = ""
         self._turn_finalized = False
         self._turn_active = False
-        
+
         # Immediate persistence to prevent answer loss on disconnect/cancel
         self.persist_to_disk()
 

@@ -1,25 +1,64 @@
-import logging
 import asyncio
+import logging
+import os
+import sys
 import time
-from typing import Optional
+from pathlib import Path
+
+# Ensure backend directory and project root are on sys.path
+_BACKEND_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _BACKEND_DIR.parent
+for _d in (str(_BACKEND_DIR), str(_PROJECT_DIR)):
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+from typing import Any, Optional
+
 from dotenv import load_dotenv
 from livekit import agents, rtc
-from livekit.agents import AgentServer, AgentSession, Agent, room_io
-from livekit.plugins import noise_cancellation, silero, assemblyai, cartesia, groq
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from tools import search_project_docs, search_candidate_resume, search_web_info, generate_feedback
-from prompts import build_interview_prompt, build_interview_greeting
-from rag import get_resume_full_text
-from stt_provider import (
-    create_stt_provider,
-    STTConfig,
-    TranscriptReconciler,
-    MissingCredentialError,
-    TECHNICAL_INTERVIEW_KEYTERMS,
-)
-from stt_metrics import stt_telemetry
+from livekit.agents import Agent, AgentServer, AgentSession, room_io
+from livekit.plugins import cartesia, groq, noise_cancellation, silero
 
-load_dotenv(".env.local")
+try:
+    from backend.prompts import build_interview_greeting, build_interview_prompt
+    from backend.rag import get_resume_full_text
+    from backend.stt_metrics import stt_telemetry
+    from backend.stt_provider import (
+        TECHNICAL_INTERVIEW_KEYTERMS,
+        MissingCredentialError,
+        STTConfig,
+        TranscriptReconciler,
+        create_stt_provider,
+    )
+    from backend.tools import (
+        generate_feedback,
+        search_candidate_resume,
+        search_project_docs,
+        search_web_info,
+    )
+except ImportError:
+    from prompts import (  # type: ignore
+        build_interview_greeting,
+        build_interview_prompt,
+    )
+    from rag import get_resume_full_text  # type: ignore
+    from stt_metrics import stt_telemetry  # type: ignore
+    from stt_provider import (  # type: ignore
+        MissingCredentialError,
+        STTConfig,
+        TranscriptReconciler,
+        create_stt_provider,
+    )
+    from tools import (  # type: ignore
+        generate_feedback,
+        search_candidate_resume,
+        search_project_docs,
+        search_web_info,
+    )
+
+# Load env from backend dir or parent
+load_dotenv(_BACKEND_DIR / ".env.local")
+load_dotenv(_BACKEND_DIR.parent / ".env.local")
 
 # Configure logging to show INFO level and above
 # This ensures tool call logs are visible
@@ -93,35 +132,35 @@ async def monitor_room_activity(
     try:
         while True:
             await asyncio.sleep(ACTIVITY_CHECK_INTERVAL)
-            
+
             # Check for non-agent participants
             has_real_participants = False
             for participant in room.remote_participants.values():
-                if not (participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT):
+                if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
                     has_real_participants = True
                     break
-            
+
             # If no real participants, wait grace period and check again
             if not has_real_participants:
                 await asyncio.sleep(EMPTY_ROOM_GRACE_PERIOD)
-                
+
                 # Re-check after grace period
                 has_real_participants = False
                 for participant in room.remote_participants.values():
-                    if not (participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT):
+                    if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
                         has_real_participants = True
                         break
-                
+
                 if not has_real_participants:
                     logger.info(f"Room {room.name} empty - cleaning up session")
                     break
-            
+
             # Check for idle timeout
             time_since_activity = time.time() - last_activity_time[0]
             if time_since_activity > IDLE_TIMEOUT:
                 logger.info(f"Session idle timeout in room {room.name}")
                 break
-    
+
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -135,30 +174,29 @@ async def my_agent(ctx: agents.JobContext):
     """
     session_id = f"{ctx.room.name}-{time.time()}"
     logger.info(f"Session starting: {session_id}")
-    
+
     # Check concurrency limit
     if not await increment_session_count():
         logger.warning(f"Rejecting session {session_id}: capacity limit reached")
         return
-    
+
     session: Optional[AgentSession] = None
     monitor_task: Optional[asyncio.Task] = None
     reconciler: Optional[TranscriptReconciler] = None
-    
+
     try:
         # Track last activity time (using list to allow modification in nested function)
         last_activity_time = [time.time()]
-        
+
         # Define event handler to update last activity time
         def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
             """Update activity time when receiving audio from user."""
-            if track.kind == rtc.TrackKind.KIND_AUDIO:
-                if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
-                    last_activity_time[0] = time.time()
-        
+            if track.kind == rtc.TrackKind.KIND_AUDIO and participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
+                last_activity_time[0] = time.time()
+
         # Register event handler
         ctx.room.on("track_subscribed", on_track_subscribed)
-        
+
         # 1. Resolve interview topic and interview type
         topic = "Full Stack Development & System Design"
         interview_type = "full"
@@ -175,8 +213,8 @@ async def my_agent(ctx: agents.JobContext):
                 pass
 
         # Also check persisted session_config.json if metadata wasn't populated
-        from pathlib import Path
         import json
+        from pathlib import Path
         session_file = Path(__file__).parent / "data" / "session_config.json"
         if session_file.exists():
             try:
@@ -201,7 +239,7 @@ async def my_agent(ctx: agents.JobContext):
 
         # 4. Resolve STT Provider & Model from room metadata, session_config, or env
         stt_provider_name = os.getenv("STT_PROVIDER", "deepgram")
-        deepgram_model = os.getenv("DEEPGRAM_MODEL", "flux-general-en")
+        deepgram_model = os.getenv("DEEPGRAM_MODEL", "nova-3")
 
         if ctx.room.metadata:
             try:
@@ -240,22 +278,26 @@ async def my_agent(ctx: agents.JobContext):
         # Initialize session with optimized audio plugins for crystal-clear sound & understanding
         try:
             # Cartesia Sonic-3 with Jacqueline voice: expressive, natural cadence, clear articulation
-            tts_plugin = cartesia.TTS(
+            cartesia_mod: Any = cartesia
+            tts_plugin = cartesia_mod.TTS(
                 model="sonic-3",
                 voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
                 speed=1.05,
             )
-            # Silero VAD tuned for snappy, sub-second natural conversational response
+            # Silero VAD: robust settings to filter out fan/background noise while keeping responsive turn-taking
+            # 0.48 activation threshold prevents background noise from falsely keeping the mic open
             vad_plugin = silero.VAD.load(
+                min_speech_duration=0.08,
                 min_silence_duration=0.35,
-                activation_threshold=0.45,
+                activation_threshold=0.48,
+                prefix_padding_duration=0.30,
             )
 
-            # Groq: sub-100ms TTFT, generous free-tier (no daily cap), perfect for real-time voice
-            # Using qwen/qwen3.8-27b — ultra-fast (~40ms TTFT) conversational model available on Groq
+            # Groq LLM: ultra-low latency inference on Groq LPU
+            groq_model_name = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
             groq_llm = groq.LLM(
-                model="qwen/qwen3.8-27b",
-                temperature=0.7,
+                model=groq_model_name,
+                temperature=0.1,  # slight warmth for natural follow-ups
             )
 
             session = AgentSession(
@@ -270,7 +312,7 @@ async def my_agent(ctx: agents.JobContext):
 
         # Wire up transcript reconciler and latency telemetry tracker
         reconciler = TranscriptReconciler(session_id=session_id)
-        current_turn_id = [None]
+        current_turn_id: list[Optional[int]] = [None]
         active_provider_name = stt_config.provider
         active_model_name = getattr(stt_plugin, "model", deepgram_model)
 
@@ -279,9 +321,8 @@ async def my_agent(ctx: agents.JobContext):
             try:
                 if ev.new_state == "speaking":
                     current_turn_id[0] = stt_telemetry.start_turn(active_provider_name, str(active_model_name))
-                elif ev.old_state == "speaking" and ev.new_state == "listening":
-                    if current_turn_id[0]:
-                        stt_telemetry.record_speech_end(current_turn_id[0], ev.created_at)
+                elif ev.old_state == "speaking" and ev.new_state == "listening" and current_turn_id[0]:
+                    stt_telemetry.record_speech_end(current_turn_id[0], ev.created_at)
             except Exception as ex:
                 logger.debug(f"Telemetry user_state_changed error: {ex}")
 
@@ -320,8 +361,11 @@ async def my_agent(ctx: agents.JobContext):
                 agent=agent_instance,
                 room_options=room_io.RoomOptions(
                     audio_input=room_io.AudioInputOptions(
-                        noise_cancellation=lambda params: noise_cancellation.BVCTelephony() 
-                        if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP 
+                        # Always apply noise cancellation for ALL participant types.
+                        # BVCTelephony for SIP (phone calls), BVC for all web/WebRTC participants.
+                        # This removes background noise, keyboard/fan sounds, and room echo.
+                        noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
+                        if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
                         else noise_cancellation.BVC(),
                     ),
                 ),
@@ -331,20 +375,20 @@ async def my_agent(ctx: agents.JobContext):
             raise
 
         try:
-            logger.info(f"Queuing greeting for {session_id}: {greeting[:100]}...")
-            session.generate_reply(instructions=greeting)
-            logger.info(f"Greeting queued successfully for {session_id}")
+            logger.info(f"Speaking greeting for {session_id}: {greeting[:100]}...")
+            session.say(greeting, add_to_chat_ctx=True)
+            logger.info(f"Greeting started successfully for {session_id}")
         except Exception as e:
-            logger.error(f"Failed to generate greeting for {session_id}: {e}", exc_info=True)
-        
+            logger.error(f"Failed to speak greeting for {session_id}: {e}", exc_info=True)
+
         # Start monitoring room activity
         monitor_task = asyncio.create_task(
             monitor_room_activity(ctx.room, session, last_activity_time)
         )
-        
+
         # Wait for monitor to signal cleanup
         await monitor_task
-        
+
     except asyncio.CancelledError:
         logger.info(f"Session {session_id} cancelled")
         raise
@@ -366,10 +410,10 @@ async def my_agent(ctx: agents.JobContext):
                 await monitor_task
             except asyncio.CancelledError:
                 pass
-        
+
         # Decrement active session count
         await decrement_session_count()
-        
+
         logger.info(f"Session {session_id} ended")
 
 
@@ -379,10 +423,9 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("Agent Server Starting...")
     print("="*60)
-    print(f"LiveKit URL: {livekit_url}")
-    print("Token Server: http://localhost:8000/token?room=<room>&username=<user>")
+    print("LiveKit URL: [Configured]")
+    print("API Endpoint: http://localhost:8000")
     print("Connect at: https://meet.livekit.io")
     print("="*60 + "\n")
     agents.cli.run_app(server)
 
-    

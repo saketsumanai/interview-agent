@@ -15,7 +15,7 @@ Calculates:
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
@@ -171,9 +171,9 @@ class STTMetricsTracker:
             f = math.floor(k)
             c = math.ceil(k)
             if f == c:
-                return sorted_vals[int(k)]
-            d0 = sorted_vals[int(f)] * (c - k)
-            d1 = sorted_vals[int(c)] * (k - f)
+                return sorted_vals[f]
+            d0 = sorted_vals[f] * (c - k)
+            d1 = sorted_vals[c] * (k - f)
             return round(d0 + d1, 2)
 
         return {

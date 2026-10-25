@@ -32,6 +32,9 @@ backend/data/interviews/
 backend/data/resume.pdf
 backend/data/resume_text.txt
 backend/data/session_config.json
+backend/data/*.db*
+*.db
+*.sqlite
 
 # OS & Editor
 .DS_Store
