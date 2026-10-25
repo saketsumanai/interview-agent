@@ -15,6 +15,8 @@ Includes:
 - Answers persistence on session cancellation or error
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -192,7 +194,7 @@ def validate_stt_config(config: STTConfig) -> STTConfig:
 
 # ─── PROVIDER ADAPTER FACTORY ───────────────────────────────────────────────
 
-def create_stt_provider(config: Optional[STTConfig] = None) -> stt.STT:
+def create_stt_provider(config: Optional[STTConfig] = None) -> Any:
     """
     Factory creating a LiveKit STT instance according to configuration.
     
