@@ -8,18 +8,33 @@ import os
 from pathlib import Path
 from typing import List
 
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+try:
+    from langchain_chroma import Chroma
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_core.documents import Document
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    Chroma = None  # type: ignore
+    PyPDFLoader = None  # type: ignore
+    Document = None  # type: ignore
+    GoogleGenerativeAIEmbeddings = None  # type: ignore
+    RecursiveCharacterTextSplitter = None  # type: ignore
 
-# Paths — Project documentation
-DATA_DIR = Path(__file__).parent / "data"
+# Paths — Project documentation & Resume (with serverless /tmp fallback)
+if os.getenv("VERCEL") or not os.access(Path(__file__).parent, os.W_OK):
+    DATA_DIR = Path("/tmp") / "data"
+else:
+    DATA_DIR = Path(__file__).parent / "data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    DATA_DIR = Path("/tmp") / "data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 PDF_PATH = DATA_DIR / "project_doc_long.pdf"
 CHROMA_DB_PATH = DATA_DIR / "chroma_db"
-
-# Paths — Resume
 RESUME_PDF_PATH = DATA_DIR / "resume.pdf"
 RESUME_TEXT_PATH = DATA_DIR / "resume_text.txt"
 RESUME_CHROMA_DB_PATH = DATA_DIR / "resume_chroma_db"

@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from livekit.agents import stt
+
+try:
+    from livekit.agents import stt
+except ImportError:
+    stt = None  # type: ignore
 
 _STT_DIR = Path(__file__).resolve().parent
 load_dotenv(_STT_DIR / ".env.local")
