@@ -126,7 +126,17 @@ app.add_middleware(
 # Constants
 MAX_CONCURRENT_SESSIONS = 5
 BACKEND_DIR = Path(__file__).parent
-DATA_DIR = BACKEND_DIR / "data"
+if os.getenv("VERCEL") or not os.access(BACKEND_DIR, os.W_OK):
+    DATA_DIR = Path("/tmp") / "data"
+else:
+    DATA_DIR = BACKEND_DIR / "data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    DATA_DIR = Path("/tmp") / "data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 RESUME_PATH = DATA_DIR / "resume.pdf"
 RESUME_DB_PATH = DATA_DIR / "resume_chroma_db"
 MAX_RESUME_SIZE_MB = 10

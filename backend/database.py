@@ -19,8 +19,15 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "data" / "zara.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+import os
+if os.getenv("VERCEL") or not os.access(Path(__file__).parent, os.W_OK):
+    DB_PATH = Path("/tmp") / "zara.db"
+else:
+    DB_PATH = Path(__file__).parent / "data" / "zara.db"
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        DB_PATH = Path("/tmp") / "zara.db"
 
 
 def get_connection() -> sqlite3.Connection:

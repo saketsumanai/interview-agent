@@ -42,3 +42,5 @@ backend/data/*.db*
 .vscode/
 *.swp
 *.swo
+.vercel
+.env*

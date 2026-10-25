@@ -12,7 +12,7 @@ import { getStoredUser, setStoredUser, logoutUser, listenAuthState, type AuthUse
 import type { ConnectionDetails } from "./types";
 import "./App.css";
 
-const TOKEN_SERVER_URL = "http://localhost:8000";
+const TOKEN_SERVER_URL = import.meta.env.VITE_BACKEND_URL || "";
 
 type AppView = "landing" | "dashboard" | "onboarding" | "interview" | "evaluation" | "recruiter" | "admin";
 type ResumeState = "none" | "uploading" | "processing" | "ready" | "error";
