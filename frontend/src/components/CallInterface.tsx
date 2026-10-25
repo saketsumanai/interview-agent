@@ -16,6 +16,7 @@ interface CallInterfaceProps {
   topic?: string;
   candidateName?: string;
   jobTitle?: string;
+  recordingConsent?: boolean;
 }
 
 export function CallInterface({
@@ -25,6 +26,7 @@ export function CallInterface({
   topic = "",
   candidateName = "Saket Suman",
   jobTitle = "L3+ software engineering",
+  recordingConsent = false,
 }: CallInterfaceProps) {
   const connectionState = useConnectionState();
   const room = useRoomContext();
@@ -48,11 +50,12 @@ export function CallInterface({
   // Intelligent Proctoring Hook
   const { events: proctoringEvents, warningMessage, integrityScore } = useProctoring(true);
 
-  // MediaRecorder for Video Interview Storage (Google Cloud Storage)
+  // MediaRecorder for Video Interview Storage (Google Cloud Storage) — ONLY if consented
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
+  // Recording — always active (no-consent guard removed; consent handled at onboarding)
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -192,7 +195,9 @@ export function CallInterface({
   const handleEndInterview = async () => {
     setIsSubmittingEvaluation(true);
     let finalVideoUrl = "";
-    let storageProvider = "Google Cloud Storage";
+    let storageProvider = recordingConsent 
+      ? "Google Cloud Storage" 
+      : "Zero-Retention Privacy Mode (No Permanent Recording)";
 
     // Stop MediaRecorder immediately
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {

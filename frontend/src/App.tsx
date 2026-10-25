@@ -42,6 +42,9 @@ export function App() {
 
   // Resume status
   const [resumeState, setResumeState] = useState<ResumeState>("ready");
+  // STT Provider & Model Selection (Deepgram Flux, Deepgram Nova-3, Groq Whisper)
+  const [sttEngine, setSttEngine] = useState<string>("deepgram:flux-general-en");
+
   const [, setResumeInfo] = useState<ResumeInfo | null>({
     filename: "Saket_Suman_Resume.pdf",
     sizeKb: 120,
@@ -102,8 +105,9 @@ export function App() {
         if (urlErr) throw new Error(urlErr);
 
         const activeTopic = topic.trim() || "Full Stack & AI Development";
+        const [sttProv, dgModel] = sttEngine.includes(":") ? sttEngine.split(":") : [sttEngine, ""];
         const tokenRes = await fetch(
-          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`
+          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}&stt_provider=${encodeURIComponent(sttProv)}&deepgram_model=${encodeURIComponent(dgModel)}`
         );
         if (!tokenRes.ok) {
           const err = await tokenRes.json();
@@ -163,7 +167,7 @@ export function App() {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Candidate",
-            role: stored?.role || "candidate",
+            role: stored?.role || "CANDIDATE",
             isDemo: false,
           };
           setStoredUser(profile);
@@ -254,9 +258,11 @@ export function App() {
           candidateName={candidateName}
           topic={topic}
           interviewType={interviewType}
+          sttEngine={sttEngine}
           onTopicChange={setTopic}
           onInterviewTypeChange={setInterviewType}
           onCandidateNameChange={setCandidateName}
+          onSttEngineChange={setSttEngine}
           onResumeUploaded={(filename, chunks) => {
             setResumeState("ready");
             setResumeInfo({

@@ -10,6 +10,14 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from tools import search_project_docs, search_candidate_resume, search_web_info, generate_feedback
 from prompts import build_interview_prompt, build_interview_greeting
 from rag import get_resume_full_text
+from stt_provider import (
+    create_stt_provider,
+    STTConfig,
+    TranscriptReconciler,
+    MissingCredentialError,
+    TECHNICAL_INTERVIEW_KEYTERMS,
+)
+from stt_metrics import stt_telemetry
 
 load_dotenv(".env.local")
 
@@ -135,6 +143,7 @@ async def my_agent(ctx: agents.JobContext):
     
     session: Optional[AgentSession] = None
     monitor_task: Optional[asyncio.Task] = None
+    reconciler: Optional[TranscriptReconciler] = None
     
     try:
         # Track last activity time (using list to allow modification in nested function)
@@ -190,13 +199,46 @@ async def my_agent(ctx: agents.JobContext):
         system_prompt = build_interview_prompt(topic, interview_type, resume_text)
         greeting = build_interview_greeting(topic, interview_type, resume_text)
 
-        # 4. Initialize session with optimized audio plugins for crystal-clear sound & understanding
+        # 4. Resolve STT Provider & Model from room metadata, session_config, or env
+        stt_provider_name = os.getenv("STT_PROVIDER", "deepgram")
+        deepgram_model = os.getenv("DEEPGRAM_MODEL", "flux-general-en")
+
+        if ctx.room.metadata:
+            try:
+                import json
+                meta = json.loads(ctx.room.metadata)
+                if meta.get("stt_provider"):
+                    stt_provider_name = meta["stt_provider"]
+                if meta.get("deepgram_model"):
+                    deepgram_model = meta["deepgram_model"]
+            except Exception:
+                pass
+
         try:
-            # AssemblyAI with format_turns=True produces punctuated, readable transcripts
-            stt_plugin = assemblyai.STT(
-                model="universal-streaming-english",
-                format_turns=True,
+            stt_config = STTConfig(
+                provider=stt_provider_name,
+                model=deepgram_model if stt_provider_name == "deepgram" else None,
             )
+            stt_plugin = create_stt_provider(stt_config)
+            logger.info(
+                f"Initialized STT provider '{stt_provider_name}' "
+                f"(model='{getattr(stt_plugin, 'model', deepgram_model)}')"
+            )
+        except MissingCredentialError as e:
+            logger.warning(f"Preferred STT provider '{stt_provider_name}' missing credentials: {e}")
+            if os.getenv("GROQ_API_KEY"):
+                logger.info("Automatically falling back to Groq STT (whisper-large-v3-turbo)")
+                stt_config = STTConfig(provider="groq", model="whisper-large-v3-turbo")
+                stt_plugin = create_stt_provider(stt_config)
+            elif os.getenv("ASSEMBLYAI_API_KEY"):
+                logger.info("Automatically falling back to AssemblyAI STT")
+                stt_config = STTConfig(provider="assemblyai")
+                stt_plugin = create_stt_provider(stt_config)
+            else:
+                raise
+
+        # Initialize session with optimized audio plugins for crystal-clear sound & understanding
+        try:
             # Cartesia Sonic-3 with Jacqueline voice: expressive, natural cadence, clear articulation
             tts_plugin = cartesia.TTS(
                 model="sonic-3",
@@ -225,6 +267,51 @@ async def my_agent(ctx: agents.JobContext):
         except Exception as e:
             logger.error(f"Failed to initialize session {session_id}: {e}", exc_info=True)
             raise
+
+        # Wire up transcript reconciler and latency telemetry tracker
+        reconciler = TranscriptReconciler(session_id=session_id)
+        current_turn_id = [None]
+        active_provider_name = stt_config.provider
+        active_model_name = getattr(stt_plugin, "model", deepgram_model)
+
+        @session.on("user_state_changed")
+        def on_user_state_changed(ev):
+            try:
+                if ev.new_state == "speaking":
+                    current_turn_id[0] = stt_telemetry.start_turn(active_provider_name, str(active_model_name))
+                elif ev.old_state == "speaking" and ev.new_state == "listening":
+                    if current_turn_id[0]:
+                        stt_telemetry.record_speech_end(current_turn_id[0], ev.created_at)
+            except Exception as ex:
+                logger.debug(f"Telemetry user_state_changed error: {ex}")
+
+        @session.on("user_input_transcribed")
+        def on_user_input_transcribed(ev):
+            try:
+                tid = current_turn_id[0]
+                if not ev.is_final:
+                    # Interim transcript: update UI captions, record interim latency
+                    # NEVER trigger question from provisional text
+                    reconciler.process_interim(ev.transcript, ev.created_at)
+                    if tid:
+                        stt_telemetry.record_first_interim(tid, ev.created_at)
+                else:
+                    # Finalized transcript segment: reconcile and deduplicate
+                    reconciler.process_final(ev.transcript, ev.created_at)
+                    if tid:
+                        stt_telemetry.record_final_transcript(tid, ev.transcript, ev.created_at)
+            except Exception as ex:
+                logger.debug(f"Telemetry user_input_transcribed error: {ex}")
+
+        @session.on("agent_state_changed")
+        def on_agent_state_changed(ev):
+            try:
+                if ev.new_state == "speaking":
+                    tid = current_turn_id[0]
+                    if tid:
+                        stt_telemetry.record_first_ai_audio(tid, ev.created_at)
+            except Exception as ex:
+                logger.debug(f"Telemetry agent_state_changed error: {ex}")
 
         try:
             agent_instance = Assistant(instructions=system_prompt)
@@ -264,6 +351,14 @@ async def my_agent(ctx: agents.JobContext):
     except Exception as e:
         logger.error(f"Error in session {session_id}: {e}", exc_info=True)
     finally:
+        # Safely persist candidate answers even if canceled or disconnected
+        if reconciler:
+            try:
+                saved_path = reconciler.persist_to_disk()
+                logger.info(f"Persisted candidate session transcripts to {saved_path}")
+            except Exception as pe:
+                logger.warning(f"Failed to persist transcripts: {pe}")
+
         # Cleanup
         if monitor_task and not monitor_task.done():
             monitor_task.cancel()

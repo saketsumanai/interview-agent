@@ -22,6 +22,45 @@ export function AdminPortal({ tokenServerUrl, onBack }: AdminPortalProps) {
   const [loading, setLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
 
+  const [providerHealth, setProviderHealth] = useState<any>(null);
+  const [sttMetrics, setSttMetrics] = useState<any>(null);
+  const [benchmarkResult, setBenchmarkResult] = useState<any>(null);
+  const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
+  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
+
+  const fetchProviderHealthAndMetrics = useCallback(async () => {
+    try {
+      const [hRes, mRes] = await Promise.all([
+        fetch(`${tokenServerUrl}/api/health/providers`).catch(() => null),
+        fetch(`${tokenServerUrl}/api/stt/metrics`).catch(() => null),
+      ]);
+      if (hRes && hRes.ok) setProviderHealth(await hRes.json());
+      if (mRes && mRes.ok) setSttMetrics(await mRes.json());
+    } catch (e) {
+      console.warn("Failed to fetch provider health:", e);
+    }
+  }, [tokenServerUrl]);
+
+  const handleRunBenchmark = async () => {
+    setIsRunningBenchmark(true);
+    setBenchmarkError(null);
+    try {
+      const res = await fetch(`${tokenServerUrl}/api/stt/benchmark`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Benchmark failed with status ${res.status}`);
+      }
+      const data = await res.json();
+      setBenchmarkResult(data);
+    } catch (e) {
+      setBenchmarkError(String(e));
+    } finally {
+      setIsRunningBenchmark(false);
+    }
+  };
+
   const fetchStats = useCallback(
     async (token: string) => {
       try {
@@ -49,9 +88,13 @@ export function AdminPortal({ tokenServerUrl, onBack }: AdminPortalProps) {
   useEffect(() => {
     if (!authToken) return;
     fetchStats(authToken);
-    const interval = setInterval(() => fetchStats(authToken), 5000);
+    fetchProviderHealthAndMetrics();
+    const interval = setInterval(() => {
+      fetchStats(authToken);
+      fetchProviderHealthAndMetrics();
+    }, 5000);
     return () => clearInterval(interval);
-  }, [authToken, fetchStats]);
+  }, [authToken, fetchStats, fetchProviderHealthAndMetrics]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -281,6 +324,149 @@ export function AdminPortal({ tokenServerUrl, onBack }: AdminPortalProps) {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* STT Telemetry & Benchmark Mode Section */}
+        {stats && (
+          <div style={{ marginTop: "2rem", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+              <div>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#f8fafc", margin: 0 }}>
+                  Speech-to-Text Infrastructure & Benchmark Mode
+                </h2>
+                <p style={{ fontSize: "0.82rem", color: "#94a3b8", margin: "0.25rem 0 0" }}>
+                  Deepgram Flux & Nova-3 vs Groq Whisper transcription accuracy and latency comparison.
+                </p>
+              </div>
+              <button
+                className="btn-primary-start"
+                onClick={handleRunBenchmark}
+                disabled={isRunningBenchmark}
+                style={{ padding: "0.45rem 0.9rem", fontSize: "0.8rem" }}
+              >
+                {isRunningBenchmark ? "Running Benchmark..." : "Run STT Benchmark"}
+              </button>
+            </div>
+
+            {/* Provider Status Cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem" }}>
+              {/* Deepgram Card */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "8px", padding: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: "0.9rem" }}>Deepgram Streaming</span>
+                  <span style={{
+                    fontSize: "0.72rem",
+                    padding: "0.15rem 0.45rem",
+                    borderRadius: "4px",
+                    background: providerHealth?.providers?.deepgram?.status === "healthy" ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                    color: providerHealth?.providers?.deepgram?.status === "healthy" ? "#10b981" : "#f87171",
+                    fontWeight: 700,
+                  }}>
+                    {providerHealth?.providers?.deepgram?.status || "Checking..."}
+                  </span>
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "#94a3b8", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                  <div>Models: <span style={{ color: "#38bdf8" }}>flux-general-en, nova-3</span></div>
+                  <div>Protocol: WebSocket v2 (Flux) / v1 (Nova-3)</div>
+                  {providerHealth?.providers?.deepgram?.latency_ms && (
+                    <div>Health Ping: <strong>{providerHealth.providers.deepgram.latency_ms} ms</strong></div>
+                  )}
+                  {providerHealth?.providers?.deepgram?.error && (
+                    <div style={{ color: "#f87171", fontSize: "0.72rem", marginTop: "0.25rem" }}>
+                      {providerHealth.providers.deepgram.error}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Groq Card */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "8px", padding: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: "0.9rem" }}>Groq Whisper STT</span>
+                  <span style={{
+                    fontSize: "0.72rem",
+                    padding: "0.15rem 0.45rem",
+                    borderRadius: "4px",
+                    background: providerHealth?.providers?.groq?.status === "healthy" ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                    color: providerHealth?.providers?.groq?.status === "healthy" ? "#10b981" : "#f87171",
+                    fontWeight: 700,
+                  }}>
+                    {providerHealth?.providers?.groq?.status || "Checking..."}
+                  </span>
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "#94a3b8", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                  <div>Model: <span style={{ color: "#f59e0b" }}>whisper-large-v3-turbo</span></div>
+                  <div>Status: Selectable Live Alternative</div>
+                  {providerHealth?.providers?.groq?.latency_ms && (
+                    <div>Health Ping: <strong>{providerHealth.providers.groq.latency_ms} ms</strong></div>
+                  )}
+                </div>
+              </div>
+
+              {/* Latency Telemetry Card */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "8px", padding: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: "0.9rem" }}>Live Turn Latency</span>
+                  <span style={{ fontSize: "0.72rem", color: "#38bdf8", fontWeight: 700 }}>p50 / p95</span>
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "#cbd5e1", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                  <div>First Interim: <strong>{sttMetrics?.latency_ms?.first_interim?.p50 || 0} ms</strong> / {sttMetrics?.latency_ms?.first_interim?.p95 || 0} ms</div>
+                  <div>Final Transcript: <strong>{sttMetrics?.latency_ms?.final_transcript?.p50 || 0} ms</strong> / {sttMetrics?.latency_ms?.final_transcript?.p95 || 0} ms</div>
+                  <div>Voice Turnaround: <strong>{sttMetrics?.latency_ms?.voice_turnaround?.p50 || 0} ms</strong> / {sttMetrics?.latency_ms?.voice_turnaround?.p95 || 0} ms</div>
+                  <div style={{ color: "#94a3b8", fontSize: "0.72rem" }}>Total Turns Tracked: {sttMetrics?.total_turns || 0} (Errors: {sttMetrics?.total_errors || 0})</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Benchmark Error Display */}
+            {benchmarkError && (
+              <div className="error-banner" style={{ marginTop: "1rem" }}>
+                <span>{benchmarkError}</span>
+              </div>
+            )}
+
+            {/* Benchmark Results Display */}
+            {benchmarkResult && (
+              <div style={{ marginTop: "1rem", background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(56, 189, 248, 0.3)", borderRadius: "8px", padding: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                  <span style={{ fontWeight: 700, color: "#38bdf8", fontSize: "0.9rem" }}>
+                    Benchmark Comparison Results
+                  </span>
+                  <span style={{ fontSize: "0.75rem", color: "#10b981", fontWeight: 600 }}>
+                    Fastest: {benchmarkResult.summary?.fastest_provider?.toUpperCase() || "N/A"}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.75rem" }}>
+                  Reference Ground Truth: <em style={{ color: "#e2e8f0" }}>"{benchmarkResult.reference_text}"</em>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  {/* Deepgram Benchmark Result */}
+                  <div style={{ background: "rgba(15, 23, 42, 0.5)", padding: "0.75rem", borderRadius: "6px" }}>
+                    <div style={{ fontWeight: 600, color: "#38bdf8", fontSize: "0.82rem" }}>Deepgram Nova-3 / Flux</div>
+                    <div style={{ fontSize: "0.78rem", color: "#f8fafc", margin: "0.35rem 0" }}>
+                      "{benchmarkResult.results?.deepgram?.transcript || "No transcript"}"
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                      Latency: <strong>{benchmarkResult.results?.deepgram?.latency_ms || 0} ms</strong> &bull; Accuracy: <strong>{benchmarkResult.results?.deepgram?.metrics?.accuracy_pct || 0}%</strong>
+                    </div>
+                  </div>
+
+                  {/* Groq Benchmark Result */}
+                  <div style={{ background: "rgba(15, 23, 42, 0.5)", padding: "0.75rem", borderRadius: "6px" }}>
+                    <div style={{ fontWeight: 600, color: "#f59e0b", fontSize: "0.82rem" }}>Groq Whisper Turbo</div>
+                    <div style={{ fontSize: "0.78rem", color: "#f8fafc", margin: "0.35rem 0" }}>
+                      "{benchmarkResult.results?.groq?.transcript || "No transcript"}"
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                      Latency: <strong>{benchmarkResult.results?.groq?.latency_ms || 0} ms</strong> &bull; Accuracy: <strong>{benchmarkResult.results?.groq?.metrics?.accuracy_pct || 0}%</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

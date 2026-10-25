@@ -16,12 +16,23 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from livekit import api
 
 from gcs_storage import save_recording, list_recordings, RECORDINGS_DIR
+import time
 from evaluation_service import (
     generate_interview_questions,
     evaluate_interview_session,
     get_evaluation_report,
     list_evaluation_reports,
 )
+from stt_provider import (
+    STTProviderType,
+    DeepgramModelType,
+    GroqModelType,
+    STTConfig,
+    validate_stt_config,
+    MissingCredentialError,
+)
+from stt_metrics import stt_telemetry
+from stt_benchmark import run_stt_benchmark
 
 load_dotenv(".env.local")
 
@@ -189,6 +200,8 @@ async def get_token(
     username: str,
     interview_type: str = "full",
     topic: str = "Full Stack Development & System Design",
+    stt_provider: Optional[str] = None,
+    deepgram_model: Optional[str] = None,
 ):
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
@@ -201,13 +214,17 @@ async def get_token(
         if not cap.get("has_capacity", True):
             raise HTTPException(status_code=429, detail=cap.get("message", "Too many sessions"))
 
+    resolved_stt_provider = stt_provider or os.getenv("STT_PROVIDER", "deepgram")
+    resolved_dg_model = deepgram_model or os.getenv("DEEPGRAM_MODEL", "flux-general-en")
+
     # Save room config
-    import json
     config = {
         "room": room,
         "username": username,
         "interview_type": interview_type,
         "topic": topic,
+        "stt_provider": resolved_stt_provider,
+        "deepgram_model": resolved_dg_model,
     }
     ROOM_CONFIGS[room] = config
     try:
@@ -216,16 +233,269 @@ async def get_token(
     except Exception as e:
         print(f"Warning: could not write session_config.json: {e}")
 
+    meta = {
+        "interview_type": interview_type,
+        "topic": topic,
+        "stt_provider": resolved_stt_provider,
+        "deepgram_model": resolved_dg_model,
+    }
+
     token = (
         api.AccessToken(api_key, api_secret)
         .with_identity(username)
         .with_name(username)
         .with_grants(api.VideoGrants(room_join=True, room=room))
-        .with_metadata(json.dumps({"interview_type": interview_type, "topic": topic}))
+        .with_metadata(json.dumps(meta))
     )
 
-    print(f"Token issued: room={room}, user={username}, type={interview_type}, topic={topic}")
-    return {"token": token.to_jwt(), "interview_type": interview_type, "topic": topic}
+    print(f"Token issued: room={room}, user={username}, type={interview_type}, topic={topic}, stt={resolved_stt_provider}")
+    return {
+        "token": token.to_jwt(),
+        "interview_type": interview_type,
+        "topic": topic,
+        "stt_provider": resolved_stt_provider,
+        "deepgram_model": resolved_dg_model,
+    }
+
+
+# ─── STT & PROVIDER HEALTH ENDPOINTS ────────────────────────────────────────
+
+@app.get("/api/health/providers")
+async def health_check_providers():
+    """
+    Health check for all AI and speech providers without leaking credentials.
+    Verifies actual connectivity and returns latency.
+    """
+    results: Dict[str, Any] = {}
+
+    # 1. Deepgram Check
+    dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
+    if dg_key:
+        try:
+            t0 = time.time()
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    "https://api.deepgram.com/v1/projects",
+                    headers={"Authorization": f"Token {dg_key}"},
+                    timeout=aiohttp.ClientTimeout(total=4.0)
+                ) as r:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    if r.status in (200, 201):
+                        results["deepgram"] = {
+                            "configured": True,
+                            "status": "healthy",
+                            "latency_ms": lat_ms,
+                            "models": ["flux-general-en", "nova-3", "nova-2"],
+                            "streaming_protocol": "WebSocket (v2 for Flux, v1 for Nova-3)",
+                        }
+                    elif r.status in (401, 403):
+                        results["deepgram"] = {
+                            "configured": True,
+                            "status": "unauthorized",
+                            "error": "DEEPGRAM_API_KEY rejected by Deepgram API (HTTP 401/403)",
+                            "latency_ms": lat_ms,
+                        }
+                    else:
+                        results["deepgram"] = {
+                            "configured": True,
+                            "status": f"http_{r.status}",
+                            "latency_ms": lat_ms,
+                        }
+        except Exception as e:
+            results["deepgram"] = {
+                "configured": True,
+                "status": "unreachable",
+                "error": str(e),
+            }
+    else:
+        results["deepgram"] = {
+            "configured": False,
+            "status": "missing_credentials",
+            "error": "DEEPGRAM_API_KEY is not configured in backend/.env.local.",
+            "models": ["flux-general-en", "nova-3", "nova-2"],
+        }
+
+    # 2. Groq Check
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        try:
+            t0 = time.time()
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {groq_key}"},
+                    timeout=aiohttp.ClientTimeout(total=4.0)
+                ) as r:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    if r.status == 200:
+                        results["groq"] = {
+                            "configured": True,
+                            "status": "healthy",
+                            "latency_ms": lat_ms,
+                            "models": ["whisper-large-v3-turbo", "whisper-large-v3"],
+                        }
+                    else:
+                        results["groq"] = {
+                            "configured": True,
+                            "status": f"http_{r.status}",
+                            "latency_ms": lat_ms,
+                        }
+        except Exception as e:
+            results["groq"] = {
+                "configured": True,
+                "status": "unreachable",
+                "error": str(e),
+            }
+    else:
+        results["groq"] = {
+            "configured": False,
+            "status": "missing_credentials",
+        }
+
+    # 3. AssemblyAI Check
+    aai_key = os.getenv("ASSEMBLYAI_API_KEY", "").strip()
+    results["assemblyai"] = {
+        "configured": bool(aai_key),
+        "status": "configured" if aai_key else "missing_credentials",
+    }
+
+    # 4. Cartesia TTS Check
+    cartesia_key = os.getenv("CARTESIA_API_KEY", "").strip()
+    results["cartesia"] = {
+        "configured": bool(cartesia_key),
+        "status": "configured" if cartesia_key else "missing_credentials",
+    }
+
+    # 5. LiveKit Cloud Check
+    lk_url = os.getenv("LIVEKIT_URL", "").strip()
+    lk_key = os.getenv("LIVEKIT_API_KEY", "").strip()
+    lk_sec = os.getenv("LIVEKIT_API_SECRET", "").strip()
+    results["livekit"] = {
+        "configured": bool(lk_url and lk_key and lk_sec),
+        "status": "configured" if (lk_url and lk_key and lk_sec) else "missing_credentials",
+        "url": lk_url or "not_configured",
+    }
+
+    overall_healthy = (
+        (results["deepgram"].get("status") == "healthy" or results["groq"].get("status") == "healthy")
+        and results["livekit"]["configured"]
+    )
+
+    return {
+        "timestamp": time.time(),
+        "overall_status": "healthy" if overall_healthy else "degraded",
+        "active_stt_provider": os.getenv("STT_PROVIDER", "deepgram"),
+        "providers": results,
+    }
+
+
+@app.get("/api/stt/config")
+async def get_stt_configuration():
+    """Retrieve current STT provider configuration and capabilities."""
+    return {
+        "active_provider": os.getenv("STT_PROVIDER", "deepgram"),
+        "deepgram_model": os.getenv("DEEPGRAM_MODEL", "flux-general-en"),
+        "groq_model": os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo"),
+        "supported_providers": [p.value for p in STTProviderType],
+        "supported_models": {
+            "deepgram": [m.value for m in DeepgramModelType],
+            "groq": [m.value for m in GroqModelType],
+        },
+        "endpointing": {
+            "nova3_endpointing_ms": int(os.getenv("DEEPGRAM_ENDPOINTING_MS", 300)),
+            "flux_eot_threshold": float(os.getenv("DEEPGRAM_EOT_THRESHOLD", 0.75)),
+            "flux_eot_timeout_ms": int(os.getenv("DEEPGRAM_EOT_TIMEOUT_MS", 2500)),
+        },
+        "credentials_status": {
+            "deepgram": bool(os.getenv("DEEPGRAM_API_KEY")),
+            "groq": bool(os.getenv("GROQ_API_KEY")),
+            "assemblyai": bool(os.getenv("ASSEMBLYAI_API_KEY")),
+        }
+    }
+
+
+@app.post("/api/stt/config")
+async def set_stt_configuration(request: Request):
+    """
+    Dynamically configure active STT provider and model.
+    Never persists keys from client; only switches provider selection.
+    """
+    body = await request.json()
+    provider = body.get("provider", "deepgram").lower().strip()
+    model = body.get("model")
+
+    if provider not in [p.value for p in STTProviderType]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider '{provider}'. Must be one of {[p.value for p in STTProviderType]}"
+        )
+
+    # Check that required server-side credentials exist
+    if provider == "deepgram" and not os.getenv("DEEPGRAM_API_KEY"):
+        raise HTTPException(
+            status_code=400,
+            detail="DEEPGRAM_API_KEY is not configured in backend/.env.local. Add your key or select 'groq'."
+        )
+    elif provider == "groq" and not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=400,
+            detail="GROQ_API_KEY is not configured in backend/.env.local."
+        )
+
+    # Apply configuration
+    os.environ["STT_PROVIDER"] = provider
+    if model:
+        if provider == "deepgram":
+            os.environ["DEEPGRAM_MODEL"] = model
+        elif provider == "groq":
+            os.environ["GROQ_STT_MODEL"] = model
+
+    # Update session_config.json if present
+    if SESSION_CONFIG_PATH.exists():
+        try:
+            curr = json.loads(SESSION_CONFIG_PATH.read_text(encoding="utf-8"))
+            curr["stt_provider"] = provider
+            if model:
+                curr["deepgram_model"] = model
+            SESSION_CONFIG_PATH.write_text(json.dumps(curr), encoding="utf-8")
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "active_provider": provider,
+        "model": model or os.getenv("DEEPGRAM_MODEL" if provider == "deepgram" else "GROQ_STT_MODEL"),
+    }
+
+
+@app.get("/api/stt/metrics")
+async def get_stt_metrics():
+    """Retrieve rolling p50/p95 latency and transcription error rates."""
+    return stt_telemetry.get_summary_metrics()
+
+
+@app.post("/api/stt/benchmark")
+async def run_benchmark_endpoint(
+    reference_text: Optional[str] = Form(None),
+    deepgram_model: Optional[str] = Form("nova-3"),
+    groq_model: Optional[str] = Form("whisper-large-v3-turbo"),
+    audio_file: Optional[UploadFile] = File(None),
+):
+    """
+    Run benchmark comparing Deepgram vs Groq without double-processing live interviews.
+    Can accept uploaded audio or auto-generate synthetic audio with technical terminology.
+    """
+    audio_bytes = None
+    if audio_file:
+        audio_bytes = await audio_file.read()
+
+    results = await run_stt_benchmark(
+        audio_bytes=audio_bytes,
+        reference_text=reference_text,
+        deepgram_model=deepgram_model or "nova-3",
+        groq_model=groq_model or "whisper-large-v3-turbo",
+    )
+    return results
 
 
 # ─── RESUME ENDPOINTS ─────────────────────────────────────────────────────────
