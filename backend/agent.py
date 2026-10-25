@@ -17,7 +17,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, room_io
-from livekit.plugins import groq, noise_cancellation, silero
+from livekit.plugins import deepgram, groq, noise_cancellation, silero
 
 try:
     from backend.prompts import build_interview_greeting, build_interview_prompt
@@ -281,18 +281,12 @@ async def my_agent(ctx: agents.JobContext):
 
         # Initialize session with optimized audio plugins for crystal-clear sound & understanding
         try:
-            # ── TTS Provider ─────────────────────────────────────────────────
-            # Groq PlayAI TTS: included in the free Groq API plan, sub-200ms latency
-            # Voice options: 'Aaliyah-PlayAI' (F), 'Arista-PlayAI' (F), 'Calum-PlayAI' (M),
-            #                'Chip-PlayAI' (M), 'Basil-PlayAI' (M, deep), 'Cimo-PlayAI' (M)
-            # NOTE: Cartesia was returning HTTP 402 (quota exceeded) — switched to Groq TTS
-            groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Aaliyah-PlayAI")
-            groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
-            tts_plugin = groq.TTS(
-                model=groq_tts_model,
-                voice=groq_tts_voice,
-            )  # api_key read from GROQ_API_KEY env var automatically
-            logger.info(f"TTS: Groq PlayAI ({groq_tts_model} / {groq_tts_voice})")
+            # ── TTS Provider: Deepgram Aura ──────────────────────────────────
+            # Deepgram Aura (aura-asteria-en): Ultra-low latency (<150ms), natural,
+            # clear professional English voice. Verified active and authenticated.
+            tts_model = os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en")
+            tts_plugin = deepgram.TTS(model=tts_model)
+            logger.info(f"TTS: Deepgram Aura ({tts_model})")
 
             # Silero VAD: tuned for noisy real-world environments
             # Lower activation_threshold (0.40) → catches speech even with background noise/fan/HVAC
