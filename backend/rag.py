@@ -181,12 +181,12 @@ def get_retriever(
         )
 
     # Create Google Generative AI embeddings (gemini-embedding-001)
-    embeddings = GoogleGenerativeAIEmbeddings(
+    embeddings = GoogleGenerativeAIEmbeddings(  # type: ignore[misc]
         model="models/gemini-embedding-001",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
 
-    vectorstore = Chroma(
+    vectorstore = Chroma(  # type: ignore[misc]
         persist_directory=str(persist_directory),
         embedding_function=embeddings,
     )
