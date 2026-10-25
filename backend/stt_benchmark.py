@@ -19,7 +19,10 @@ import time
 from typing import Any, Dict, Optional
 
 import aiohttp
-import openai
+try:
+    import openai
+except ImportError:
+    openai = None  # type: ignore
 from dotenv import load_dotenv
 from stt_metrics import calculate_cer, calculate_wer
 from stt_provider import TECHNICAL_INTERVIEW_KEYTERMS
