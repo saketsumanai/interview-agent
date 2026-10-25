@@ -4,9 +4,11 @@ Handles document ingestion, chunking, and retrieval from vector store.
 Now uses Google Generative AI (Gemini) embeddings instead of OpenAI.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, Any, List, Optional
 
 try:
     from langchain_chroma import Chroma
@@ -14,12 +16,14 @@ try:
     from langchain_core.documents import Document
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    _LANGCHAIN_AVAILABLE = True
 except ImportError:
     Chroma = None  # type: ignore
     PyPDFLoader = None  # type: ignore
     Document = None  # type: ignore
     GoogleGenerativeAIEmbeddings = None  # type: ignore
     RecursiveCharacterTextSplitter = None  # type: ignore
+    _LANGCHAIN_AVAILABLE = False
 
 # Paths — Project documentation & Resume (with serverless /tmp fallback)
 if os.getenv("VERCEL") or not os.access(Path(__file__).parent, os.W_OK):
@@ -44,7 +48,7 @@ def load_and_chunk_documents(
     pdf_path: Path = PDF_PATH,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
-) -> List[Document]:
+) -> List[Any]:
     """
     Load PDF and split into chunks.
     
@@ -56,12 +60,14 @@ def load_and_chunk_documents(
     Returns:
         List of Document chunks
     """
+    if not _LANGCHAIN_AVAILABLE:
+        raise RuntimeError("langchain packages not installed; cannot load documents.")
     # Load PDF
-    loader = PyPDFLoader(str(pdf_path))
+    loader = PyPDFLoader(str(pdf_path))  # type: ignore[misc]
     documents = loader.load()
 
     # Split into chunks
-    text_splitter = RecursiveCharacterTextSplitter(
+    text_splitter = RecursiveCharacterTextSplitter(  # type: ignore[misc]
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         length_function=len,
@@ -78,7 +84,7 @@ def ingest_documents(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     batch_size: int = 50,
-) -> Chroma:
+) -> Any:
     """
     Ingest documents into ChromaDB vector store using Gemini embeddings.
     Uses batched ingestion to respect Gemini free-tier rate limits
@@ -105,10 +111,10 @@ def ingest_documents(
     # Load and chunk documents
     chunks = load_and_chunk_documents(pdf_path, chunk_size, chunk_overlap)
 
-    print(f"Split {len({doc.metadata.get('source') for doc in chunks})} documents into {len(chunks)} chunks")
+    print(f"Split {len({getattr(doc, 'metadata', {}).get('source') for doc in chunks})} documents into {len(chunks)} chunks")
 
     # Create Google Generative AI embeddings (gemini-embedding-001)
-    embeddings = GoogleGenerativeAIEmbeddings(
+    embeddings = GoogleGenerativeAIEmbeddings(  # type: ignore[misc]
         model="models/gemini-embedding-001",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
@@ -124,7 +130,7 @@ def ingest_documents(
 
         if vectorstore is None:
             # First batch: create the store
-            vectorstore = Chroma.from_documents(
+            vectorstore = Chroma.from_documents(  # type: ignore[union-attr]
                 documents=batch,
                 embedding=embeddings,
                 persist_directory=str(persist_directory),
@@ -139,7 +145,7 @@ def ingest_documents(
             time.sleep(65)
 
     if vectorstore is None:
-        vectorstore = Chroma(
+        vectorstore = Chroma(  # type: ignore[misc]
             embedding_function=embeddings,
             persist_directory=str(persist_directory),
         )
@@ -188,7 +194,7 @@ def get_retriever(
     return vectorstore.as_retriever(search_kwargs={"k": k})
 
 
-def deduplicate_documents(docs: List[Document]) -> List[Document]:
+def deduplicate_documents(docs: List[Any]) -> List[Any]:
     """
     Remove duplicate documents from retrieval results.
     
@@ -207,7 +213,8 @@ def deduplicate_documents(docs: List[Document]) -> List[Document]:
     for doc in docs:
         # Use first 150 chars as fingerprint (covers most overlap cases)
         # Normalize whitespace for better matching
-        fingerprint = " ".join(doc.page_content[:150].strip().split())
+        content = getattr(doc, "page_content", "") or ""
+        fingerprint = " ".join(content[:150].strip().split())
 
         if fingerprint not in seen:
             seen.add(fingerprint)
@@ -248,7 +255,7 @@ def query_rag(query: str, k: int = 4, deduplicate: bool = True) -> str:
         docs = docs[:k]
 
     # Concatenate retrieved documents
-    context = "\n\n---\n\n".join([doc.page_content for doc in docs])
+    context = "\n\n---\n\n".join([getattr(doc, "page_content", "") for doc in docs])
 
     return context
 
@@ -279,7 +286,7 @@ def ingest_resume(
     persist_directory: Path = RESUME_CHROMA_DB_PATH,
     chunk_size: int = 800,
     chunk_overlap: int = 150,
-) -> Chroma:
+) -> Any:
     """
     Ingest a candidate's resume (PDF or DOCX) into a dedicated ChromaDB collection.
     Also extracts and saves full raw resume text for prompt grounding.
@@ -297,9 +304,9 @@ def ingest_resume(
         full_text = extract_text_from_docx(pdf_path)
     else:
         try:
-            loader = PyPDFLoader(str(pdf_path))
+            loader = PyPDFLoader(str(pdf_path))  # type: ignore[misc]
             raw_docs = loader.load()
-            full_text = "\n\n".join([doc.page_content for doc in raw_docs])
+            full_text = "\n\n".join([getattr(d, "page_content", "") for d in raw_docs])
         except Exception as e:
             print(f"Warning: PDF load error: {e}")
 
@@ -309,7 +316,7 @@ def ingest_resume(
         print(f"Resume text saved: {len(full_text)} characters -> {RESUME_TEXT_PATH}")
 
     if is_docx:
-        text_splitter = RecursiveCharacterTextSplitter(
+        text_splitter = RecursiveCharacterTextSplitter(  # type: ignore[misc]
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=len,
@@ -319,12 +326,12 @@ def ingest_resume(
         chunks = load_and_chunk_documents(pdf_path, chunk_size, chunk_overlap)
     print(f"Resume: split into {len(chunks)} chunks")
 
-    embeddings = GoogleGenerativeAIEmbeddings(
+    embeddings = GoogleGenerativeAIEmbeddings(  # type: ignore[misc]
         model="models/gemini-embedding-001",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
 
-    vectorstore = Chroma.from_documents(
+    vectorstore = Chroma.from_documents(  # type: ignore[union-attr]
         documents=chunks,
         embedding=embeddings,
         persist_directory=str(persist_directory),
@@ -347,9 +354,9 @@ def get_resume_full_text() -> str:
 
     if RESUME_PDF_PATH.exists():
         try:
-            loader = PyPDFLoader(str(RESUME_PDF_PATH))
+            loader = PyPDFLoader(str(RESUME_PDF_PATH))  # type: ignore[misc]
             docs = loader.load()
-            text = "\n\n".join([doc.page_content for doc in docs]).strip()
+            text = "\n\n".join([getattr(d, "page_content", "") for d in docs]).strip()
             if text:
                 RESUME_TEXT_PATH.parent.mkdir(parents=True, exist_ok=True)
                 RESUME_TEXT_PATH.write_text(text, encoding="utf-8")
@@ -387,12 +394,12 @@ def get_resume_retriever(
     if not os.getenv("GOOGLE_API_KEY"):
         return None
 
-    embeddings = GoogleGenerativeAIEmbeddings(
+    embeddings = GoogleGenerativeAIEmbeddings(  # type: ignore[misc]
         model="models/gemini-embedding-001",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )
 
-    vectorstore = Chroma(
+    vectorstore = Chroma(  # type: ignore[misc]
         persist_directory=str(persist_directory),
         embedding_function=embeddings,
     )
@@ -421,7 +428,7 @@ def query_resume_rag(query: str, k: int = 4) -> str:
         docs = deduplicate_documents(docs)[:k]
         if not docs:
             return "No relevant information found in the candidate's resume."
-        return "\n\n---\n\n".join([doc.page_content for doc in docs])
+        return "\n\n---\n\n".join([getattr(d, "page_content", "") for d in docs])
     except Exception as e:
         return f"Error querying resume: {e}"
 

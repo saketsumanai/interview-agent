@@ -256,6 +256,10 @@ async def my_agent(ctx: agents.JobContext):
             stt_config = STTConfig(
                 provider=stt_provider_name,
                 model=deepgram_model if stt_provider_name == "deepgram" else None,
+                # Load endpointing tuning from env (set in .env.local for per-deployment control)
+                endpointing_ms=int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "150")),
+                eot_threshold=float(os.getenv("DEEPGRAM_EOT_THRESHOLD", "0.55")),
+                eot_timeout_ms=int(os.getenv("DEEPGRAM_EOT_TIMEOUT_MS", "1000")),
             )
             stt_plugin = create_stt_provider(stt_config)
             logger.info(
@@ -284,13 +288,15 @@ async def my_agent(ctx: agents.JobContext):
                 voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
                 speed=1.05,
             )
-            # Silero VAD: robust settings to filter out fan/background noise while keeping responsive turn-taking
-            # 0.48 activation threshold prevents background noise from falsely keeping the mic open
+            # Silero VAD: tuned for noisy real-world environments
+            # Lower activation_threshold (0.40) → catches speech even with background noise/fan/HVAC
+            # Shorter min_silence_duration (0.25s) → faster turn-taking after user finishes
+            # Longer prefix_padding (0.40s) → don't clip the first syllable (critical for pronunciation)
             vad_plugin = silero.VAD.load(
-                min_speech_duration=0.08,
-                min_silence_duration=0.35,
-                activation_threshold=0.48,
-                prefix_padding_duration=0.30,
+                min_speech_duration=0.06,
+                min_silence_duration=0.25,
+                activation_threshold=0.40,
+                prefix_padding_duration=0.40,
             )
 
             # Groq LLM: ultra-low latency inference on Groq LPU

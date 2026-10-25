@@ -24,8 +24,14 @@ try:
 except ImportError:
     openai = None  # type: ignore
 from dotenv import load_dotenv
-from stt_metrics import calculate_cer, calculate_wer
-from stt_provider import TECHNICAL_INTERVIEW_KEYTERMS
+
+# Support both direct execution (backend/) and package (backend.stt_metrics)
+try:
+    from backend.stt_metrics import calculate_cer, calculate_wer
+    from backend.stt_provider import TECHNICAL_INTERVIEW_KEYTERMS
+except ImportError:
+    from stt_metrics import calculate_cer, calculate_wer  # type: ignore
+    from stt_provider import TECHNICAL_INTERVIEW_KEYTERMS  # type: ignore
 
 load_dotenv(".env.local")
 logger = logging.getLogger("stt_benchmark")
@@ -65,7 +71,10 @@ async def generate_synthetic_audio(text: str) -> bytes:
                         "sample_rate": 16000,
                     },
                 }
-                async with session.post(url, headers=headers, json=payload, timeout=15) as resp:
+                async with session.post(
+                    url, headers=headers, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
                     if resp.status == 200:
                         return await resp.read()
         except Exception as e:
@@ -128,7 +137,10 @@ async def benchmark_deepgram(
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=audio_bytes, timeout=20) as resp:
+            async with session.post(
+                url, headers=headers, data=audio_bytes,
+                timeout=aiohttp.ClientTimeout(total=20)
+            ) as resp:
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
                 if resp.status == 200:
                     data = await resp.json()
@@ -191,6 +203,15 @@ async def benchmark_groq(
 
     start_time = time.time()
     try:
+        if openai is None:
+            return {
+                "provider": "groq",
+                "model": model,
+                "success": False,
+                "error": "openai package not installed",
+                "latency_ms": 0,
+                "transcript": "",
+            }
         client = openai.AsyncOpenAI(
             base_url="https://api.groq.com/openai/v1",
             api_key=key,

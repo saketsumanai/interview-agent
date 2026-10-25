@@ -257,7 +257,14 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> Any:
         from livekit.plugins.groq import STT as GroqSTT
         model = config.model or GroqModelType.WHISPER_LARGE_V3_TURBO.value
         logger.info(f"Initializing Groq STT adapter (model={model})")
-        vocab_prompt = "Technical interview discussion covering: " + ", ".join(config.keyterms[:35])
+        # Rich prompt: technical vocabulary + accent/noise tolerance instruction
+        # Whisper uses the prompt as context to bias recognition toward these words
+        vocab_prompt = (
+            "This is a technical software engineering interview. "
+            "The candidate may have an accent or background noise; "
+            "interpret pronunciation variations liberally. "
+            "Key terms: " + ", ".join(config.keyterms[:35])
+        )
         assert config.api_key, "Groq API key must be set before STT initialization"
         return GroqSTT(
             model=model,
