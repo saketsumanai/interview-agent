@@ -17,7 +17,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, room_io
-from livekit.plugins import cartesia, groq, noise_cancellation, silero
+from livekit.plugins import groq, noise_cancellation, silero
 
 try:
     from backend.prompts import build_interview_greeting, build_interview_prompt

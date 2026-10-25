@@ -92,38 +92,37 @@ export function App() {
     setError(null);
 
     try {
-      const capRes = await fetch(`${TOKEN_SERVER_URL}/capacity-check`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
-      if (capRes && capRes.ok) {
-        const roomName = `interview-${Date.now()}`;
-        const username = candidateName || "candidate";
+      const roomName = `interview-${Date.now()}`;
+      const username = candidateName || "candidate";
 
-        const urlRes = await fetch(`${TOKEN_SERVER_URL}/livekit-url`);
-        if (!urlRes.ok) throw new Error("Failed to get LiveKit URL");
-        const { url, error: urlErr } = await urlRes.json();
-        if (urlErr) throw new Error(urlErr);
+      // 1. Fetch livekit url with 8s timeout
+      const urlRes = await fetch(`${TOKEN_SERVER_URL}/livekit-url`, { signal: AbortSignal.timeout(8000) });
+      if (!urlRes.ok) throw new Error("Failed to get LiveKit URL");
+      const { url, error: urlErr } = await urlRes.json();
+      if (urlErr) throw new Error(urlErr);
 
-        const activeTopic = topic.trim() || "Full Stack & AI Development";
-        const tokenRes = await fetch(
-          `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`
-        );
-        if (!tokenRes.ok) {
-          const err = await tokenRes.json();
-          throw new Error(err.detail || "Failed to obtain room token");
-        }
-        const { token, error: tokenErr } = await tokenRes.json();
-        if (tokenErr) throw new Error(tokenErr);
-
-        setConnectionDetails({ url, token, roomName });
-        setView("interview");
-      } else {
-        // Offline preview mode: launch interview interface directly for local viewing
-        setConnectionDetails({ url: "ws://localhost:7880", token: "", roomName: "offline-preview" });
-        setView("interview");
+      // 2. Fetch room token with 10s timeout
+      const activeTopic = topic.trim() || "Full Stack & AI Development";
+      const tokenRes = await fetch(
+        `${TOKEN_SERVER_URL}/token?room=${roomName}&username=${encodeURIComponent(username)}&interview_type=${interviewType}&topic=${encodeURIComponent(activeTopic)}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to obtain room token");
       }
-    } catch (_err) {
-      // Offline fallback: launch interview screen directly
-      setConnectionDetails({ url: "ws://localhost:7880", token: "", roomName: "offline-preview" });
+      const { token, error: tokenErr } = await tokenRes.json();
+      if (tokenErr) throw new Error(tokenErr);
+
+      if (!token || !url) {
+        throw new Error("Invalid token or LiveKit URL received from server");
+      }
+
+      setConnectionDetails({ url, token, roomName });
       setView("interview");
+    } catch (err: any) {
+      console.error("Start interview error:", err);
+      setError(err?.message || "Failed to connect to Zara AI. Please try again.");
     } finally {
       setIsConnecting(false);
       isStartingRef.current = false;
