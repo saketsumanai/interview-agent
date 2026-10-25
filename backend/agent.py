@@ -281,13 +281,19 @@ async def my_agent(ctx: agents.JobContext):
 
         # Initialize session with optimized audio plugins for crystal-clear sound & understanding
         try:
-            # Cartesia Sonic-3 with Jacqueline voice: expressive, natural cadence, clear articulation
-            cartesia_mod: Any = cartesia
-            tts_plugin = cartesia_mod.TTS(
-                model="sonic-3",
-                voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
-                speed=1.05,
-            )
+            # ── TTS Provider ─────────────────────────────────────────────────
+            # Groq PlayAI TTS: included in the free Groq API plan, sub-200ms latency
+            # Voice options: 'Aaliyah-PlayAI' (F), 'Arista-PlayAI' (F), 'Calum-PlayAI' (M),
+            #                'Chip-PlayAI' (M), 'Basil-PlayAI' (M, deep), 'Cimo-PlayAI' (M)
+            # NOTE: Cartesia was returning HTTP 402 (quota exceeded) — switched to Groq TTS
+            groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Aaliyah-PlayAI")
+            groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
+            tts_plugin = groq.TTS(
+                model=groq_tts_model,
+                voice=groq_tts_voice,
+            )  # api_key read from GROQ_API_KEY env var automatically
+            logger.info(f"TTS: Groq PlayAI ({groq_tts_model} / {groq_tts_voice})")
+
             # Silero VAD: tuned for noisy real-world environments
             # Lower activation_threshold (0.40) → catches speech even with background noise/fan/HVAC
             # Shorter min_silence_duration (0.25s) → faster turn-taking after user finishes
