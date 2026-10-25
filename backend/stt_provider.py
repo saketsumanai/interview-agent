@@ -48,7 +48,9 @@ TECHNICAL_INTERVIEW_KEYTERMS: List[str] = [
     "sharding", "replication", "event-driven", "idempotency", "consensus", "Raft",
     "Paxos", "MapReduce", "DynamoDB", "Cassandra", "RabbitMQ", "Elasticsearch",
     "multithreading", "concurrency", "deadlock", "race condition", "microfrontend",
-    "TypeScript", "Python", "Go", "Rust", "vector database", "RAG", "LLM", "TTS", "STT"
+    "TypeScript", "Python", "Go", "Rust", "vector database", "RAG", "LLM", "TTS", "STT",
+    "full stack", "backend", "frontend", "mobile app", "multi-mobility", "rider", "driver",
+    "system design", "distributed systems", "load balancing", "API gateway", "caching"
 ]
 
 # Boosted keywords for Nova-3 / Nova-2 legacy models (word, boost_score)
@@ -111,8 +113,8 @@ class STTConfig:
     language: str = "en-US"
     api_key: Optional[str] = None
 
-    # Endpointing & turn detection tuning
-    endpointing_ms: int = 200             # Nova-3 silence gap before turn ends (was 300ms)
+    # Endpointing & turn detection tuning (450ms gives natural speech breathing room)
+    endpointing_ms: int = 450             # Nova-3 silence gap before turn ends (was 200ms)
     eot_threshold: float = 0.60           # Flux EOT probability threshold (was 0.75 — lower = faster)
     eager_eot_threshold: float = 0.40     # Flux eager-EOT threshold (was 0.55)
     eot_timeout_ms: int = 1200            # Flux forced EOT timeout (was 2500ms — critical latency cut)
@@ -247,7 +249,8 @@ def create_stt_provider(config: Optional[STTConfig] = None) -> Any:
                 sample_rate=16000,
                 interim_results=config.interim_results,
                 punctuate=config.punctuate,
-                smart_format=config.smart_format,
+                smart_format=True,
+                filler_words=False,
                 endpointing_ms=config.endpointing_ms,
                 keyterms=config.keyterms,
                 base_url="https://api.deepgram.com/v1/listen",

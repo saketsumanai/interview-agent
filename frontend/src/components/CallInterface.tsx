@@ -52,8 +52,11 @@ export function CallInterface({
   const recordingStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
+    // Only capture video for local camera preview — NEVER capture audio here.
+    // Audio is strictly managed by LiveKit's WebRTC audio track to ensure
+    // hardware echo cancellation and noise suppression work at 100% capacity.
     navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
+      .getUserMedia({ video: true, audio: false })
       .then((stream) => {
         recordingStreamRef.current = stream;
       })
@@ -86,8 +89,9 @@ export function CallInterface({
     };
   }, []);
 
-  // Web Speech API fallback for offline testing or real-time local captioning
+  // Web Speech API fallback for offline preview only (disabled when connected to LiveKit)
   useEffect(() => {
+    if (connectionState === ConnectionState.Connected) return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 

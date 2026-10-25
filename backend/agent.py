@@ -257,9 +257,9 @@ async def my_agent(ctx: agents.JobContext):
                 provider=stt_provider_name,
                 model=deepgram_model if stt_provider_name == "deepgram" else None,
                 # Load endpointing tuning from env (set in .env.local for per-deployment control)
-                endpointing_ms=int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "150")),
+                endpointing_ms=int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "450")),
                 eot_threshold=float(os.getenv("DEEPGRAM_EOT_THRESHOLD", "0.55")),
-                eot_timeout_ms=int(os.getenv("DEEPGRAM_EOT_TIMEOUT_MS", "1000")),
+                eot_timeout_ms=int(os.getenv("DEEPGRAM_EOT_TIMEOUT_MS", "1500")),
             )
             stt_plugin = create_stt_provider(stt_config)
             logger.info(
@@ -281,22 +281,22 @@ async def my_agent(ctx: agents.JobContext):
 
         # Initialize session with optimized audio plugins for crystal-clear sound & understanding
         try:
-            # ── TTS Provider: Deepgram Aura ──────────────────────────────────
-            # Deepgram Aura (aura-asteria-en): Ultra-low latency (<150ms), natural,
-            # clear professional English voice. Verified active and authenticated.
-            tts_model = os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en")
-            tts_plugin = deepgram.TTS(model=tts_model)
-            logger.info(f"TTS: Deepgram Aura ({tts_model})")
+            # ── TTS Provider: Deepgram Aura 2 ─────────────────────────────────
+            # Aura 2 Thalia (aura-2-thalia-en): Next-generation studio quality,
+            # natural female intonation, pristine 24kHz sample rate, sub-150ms latency.
+            tts_model = os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-thalia-en")
+            tts_plugin = deepgram.TTS(model=tts_model, sample_rate=24000)
+            logger.info(f"TTS: Deepgram Aura 2 ({tts_model} @ 24kHz)")
 
-            # Silero VAD: tuned for noisy real-world environments
-            # Lower activation_threshold (0.40) → catches speech even with background noise/fan/HVAC
-            # Shorter min_silence_duration (0.25s) → faster turn-taking after user finishes
-            # Longer prefix_padding (0.40s) → don't clip the first syllable (critical for pronunciation)
+            # Silero VAD: Tuned for real-world background noise & accented speech
+            # activation_threshold (0.45): Filters ambient room hum, fan, and typing noise
+            # min_silence_duration (0.50s): Prevents cutting off candidate mid-thought
+            # prefix_padding_duration (0.50s): Preserves the first syllable of soft/accented words
             vad_plugin = silero.VAD.load(
-                min_speech_duration=0.06,
-                min_silence_duration=0.25,
-                activation_threshold=0.40,
-                prefix_padding_duration=0.40,
+                min_speech_duration=0.08,
+                min_silence_duration=0.50,
+                activation_threshold=0.45,
+                prefix_padding_duration=0.50,
             )
 
             # Groq LLM: ultra-low latency inference on Groq LPU
@@ -367,13 +367,14 @@ async def my_agent(ctx: agents.JobContext):
                 agent=agent_instance,
                 room_options=room_io.RoomOptions(
                     audio_input=room_io.AudioInputOptions(
-                        # Always apply noise cancellation for ALL participant types.
-                        # BVCTelephony for SIP (phone calls), BVC for all web/WebRTC participants.
-                        # This removes background noise, keyboard/fan sounds, and room echo.
+                        # Noise cancellation for web & SIP participants
                         noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
                         if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
                         else noise_cancellation.BVC(),
                     ),
+                ),
+                room_output_options=room_io.RoomOutputOptions(
+                    audio_sample_rate=24000,
                 ),
             )
         except Exception as e:
